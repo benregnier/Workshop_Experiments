@@ -182,6 +182,7 @@ void buildHilbert() {
     // Then apply Hamming window and force antisymmetry.
     const int M = HTAPS;
     const int mid = (M - 1) / 2;
+    constexpr float passbandNormFreq = 0.15f; // Representative pass-band frequency (fraction of Fs)
     for (int n = 0; n < M; ++n) {
         int k = n - mid;
         float ideal = 0.0f;
@@ -197,6 +198,33 @@ void buildHilbert() {
         h[n] = -h[M - 1 - n];
     }
     h[mid] = 0.0f; // center tap is zero
+
+    // Measure Hilbert branch gain at a representative pass-band frequency.
+    float gainRe = 0.0f;
+    float gainIm = 0.0f;
+    const float omega = 2.0f * (float)M_PI * passbandNormFreq;
+    for (int n = 0; n < M; ++n) {
+        float phase = -omega * (float)(n - mid);
+        float c = cosf(phase);
+        float s = sinf(phase);
+        gainRe += h[n] * c;
+        gainIm += h[n] * s;
+    }
+    float gainMag = sqrtf(gainRe * gainRe + gainIm * gainIm);
+
+    if (gainMag > 0.0f) {
+        float compensation = 1.0f / gainMag;
+        for (int n = 0; n < M; ++n) {
+            h[n] *= compensation;
+        }
+        // Re-enforce antisymmetry after scaling to guarantee Hilbert behaviour.
+        for (int n = 0; n < mid; ++n) {
+            float val = 0.5f * (h[n] - h[M - 1 - n]);
+            h[n] = val;
+            h[M - 1 - n] = -val;
+        }
+        h[mid] = 0.0f;
+    }
 }
 
 
