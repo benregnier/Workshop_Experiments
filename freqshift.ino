@@ -33,9 +33,9 @@ public:
 
 
 
-    // Map your desired shift: here we map X knob (0..1) to ±MAX_SHIFT
+    // Map your desired shift: here we map X knob (0..4095) to ±MAX_SHIFT
     inline float knobToShiftHz() {
-        float k = KnobVal(X);           // 0..1 from library; adjust if your API differs
+        float k = KnobVal(X) / 4095.0f; // raw knob is 0..4095; normalise to 0..1
         return (k * 2.0f - 1.0f) * MAX_SHIFT;
     }
 
