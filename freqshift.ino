@@ -21,6 +21,8 @@ public:
     static constexpr uint32_t CONTROL_UPDATE_SAMPLES = 64;                  // control-rate divider
     static constexpr bool   UPPER_SB  = true;      // true=upper, false=lower
 
+    static constexpr int    HTAP_PAIRS = (HTAPS - 1) / 2;
+
     static constexpr uint32_t STATUS_LED_INDEX      = 0;                     // LED to flash
     static constexpr uint32_t STATUS_TOGGLE_SAMPLES = FS / 2;                // toggle twice per second
 
@@ -102,10 +104,14 @@ private:
     float hilbert(float x) {
         delayLine[idx] = x;
         float acc = 0.0f;
-        int p = idx;
-        for (int n = 0; n < HTAPS; ++n) {
-            acc += h[n] * delayLine[p];
-            if (--p < 0) p = HTAPS - 1;
+        int pDec = idx;
+        int pInc = (idx + 1) % HTAPS;
+        for (int n = 0; n < HTAP_PAIRS; ++n) {
+            const float coeff = h[n];
+            const float diff = delayLine[pDec] - delayLine[pInc];
+            acc += coeff * diff;
+            pDec = (pDec + HTAPS - 1) % HTAPS;
+            pInc = (pInc + 1) % HTAPS;
         }
         if (++idx >= HTAPS) idx = 0;
         return acc;
