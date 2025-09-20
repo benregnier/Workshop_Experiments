@@ -59,7 +59,7 @@ private:
     uint32_t phase = 0;
     q31_t sinLUT[LUTN] = {};
 
-    inline float knobToShiftHz() const {
+    inline float knobToShiftHz() {
         constexpr float invMax = 1.0f / 4095.0f;
         float k = static_cast<float>(KnobVal(Knob::X)) * invMax; // 0..1
         return (k * 2.0f - 1.0f) * MAX_SHIFT_HZ;
