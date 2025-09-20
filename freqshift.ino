@@ -76,7 +76,6 @@ public:
         } else if (scaled < minVal) {
             scaled = minVal;
         }
-        AudioOut1(y);
 
         updateStatusLed();
 
