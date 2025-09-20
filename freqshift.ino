@@ -20,6 +20,8 @@ public:
     static constexpr float  INV_AUDIO_SCALE = 1.0f / AUDIO_SCALE;
     static constexpr uint32_t CONTROL_UPDATE_SAMPLES = 64;                  // control-rate divider
     static constexpr bool   UPPER_SB  = true;      // true=upper, false=lower
+    static constexpr uint16_t KNOB_CHANGE_THRESHOLD = 6;                    // counts required to treat as real move
+    static constexpr float  SHIFT_SMOOTH_ALPHA = 0.25f;                     // one-pole smoothing
 
     static constexpr uint32_t STATUS_LED_INDEX      = 0;                     // LED to flash
     static constexpr uint32_t STATUS_TOGGLE_SAMPLES = FS / 2;                // toggle twice per second
@@ -60,11 +62,32 @@ public:
         float Q = hilbert(x);              // 90° shifted
 
         uint16_t knobRaw = static_cast<uint16_t>(KnobVal(X));
-        bool knobChanged = (knobRaw != lastKnobRaw);
+        bool knobInitializedNow = false;
+        if (!knobInitialised) {
+            knobInitialised = true;
+            knobInitializedNow = true;
+        }
 
-        if (controlCounter == 0 || knobChanged) {
+        bool knobMoved = false;
+        if (knobInitializedNow) {
             lastKnobRaw = knobRaw;
-            updatePhaseIncrement(knobRaw);
+            targetShiftHz = knobToShiftHz(knobRaw);
+            smoothedShiftHz = targetShiftHz;
+            knobMoved = true;
+        } else {
+            uint16_t diff = (knobRaw > lastKnobRaw) ? (knobRaw - lastKnobRaw)
+                                                   : (lastKnobRaw - knobRaw);
+            if (diff >= KNOB_CHANGE_THRESHOLD) {
+                lastKnobRaw = knobRaw;
+                targetShiftHz = knobToShiftHz(knobRaw);
+                knobMoved = true;
+            }
+        }
+
+        if (knobMoved || controlCounter == 0) {
+            float delta = targetShiftHz - smoothedShiftHz;
+            smoothedShiftHz += SHIFT_SMOOTH_ALPHA * delta;
+            updatePhaseIncrement(smoothedShiftHz);
         }
 
         if (++controlCounter >= CONTROL_UPDATE_SAMPLES) {
@@ -139,11 +162,13 @@ private:
     uint32_t statusCounter = 0;
     bool statusLedOn = false;
     uint16_t lastKnobRaw = 0;
+    float targetShiftHz = 0.0f;
+    float smoothedShiftHz = 0.0f;
+    bool knobInitialised = false;
     uint32_t cachedPhaseInc = 0;
     uint32_t controlCounter = 0;
 
-    void updatePhaseIncrement(uint16_t knobRaw) {
-        float shiftHz = knobToShiftHz(knobRaw);
+    void updatePhaseIncrement(float shiftHz) {
         float phaseIncF = roundf(shiftHz * PHASE_SCALE);
         int32_t phaseIncSigned = static_cast<int32_t>(phaseIncF);
         cachedPhaseInc = static_cast<uint32_t>(phaseIncSigned);
