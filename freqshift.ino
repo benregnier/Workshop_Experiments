@@ -1,3 +1,7 @@
+#ifndef USE_Q31_VARIANT
+// Default floating-point implementation. Define USE_Q31_VARIANT to build the
+// fixed-point variant in freqshiftq31.ino instead.
+
 #include "ComputerCard.h"
 #include <math.h>
 #include <stdint.h>
@@ -254,3 +258,5 @@ void setup() {
 void loop() {
     fs.Run(); // This will call ProcessSample() at 48kHz
 }
+
+#endif // !USE_Q31_VARIANT
