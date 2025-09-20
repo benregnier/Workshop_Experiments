@@ -18,6 +18,7 @@ public:
     static constexpr float  MAX_SHIFT = 4000.0f;   // Hz limit for knob mapping
     static constexpr float  AUDIO_SCALE = 2048.0f;
     static constexpr float  INV_AUDIO_SCALE = 1.0f / AUDIO_SCALE;
+    static constexpr uint32_t CONTROL_UPDATE_SAMPLES = 64;                  // control-rate divider
     static constexpr bool   UPPER_SB  = true;      // true=upper, false=lower
 
     static constexpr uint32_t STATUS_LED_INDEX      = 0;                     // LED to flash
@@ -41,12 +42,14 @@ public:
     uint32_t phase = 0;
     static constexpr uint32_t PHASE_BITS = 32;
     static constexpr uint32_t PHASE_MASK = 0xFFFFFFFFu;
+    static constexpr float  PHASE_SCALE =
+        (float)((double)(1ULL << PHASE_BITS) / (double)FS);                 // Hz->phase scale
 
 
 
     // Map your desired shift: here we map X knob (0..4095) to ±MAX_SHIFT
-    inline float knobToShiftHz() {
-        float k = KnobVal(X) / 4095.0f; // raw knob is 0..4095; normalise to 0..1
+    inline float knobToShiftHz(uint16_t knobRaw) {
+        float k = knobRaw / 4095.0f; // raw knob is 0..4095; normalise to 0..1
         return (k * 2.0f - 1.0f) * MAX_SHIFT;
     }
 
@@ -56,10 +59,19 @@ public:
         float I = pushDelay(x);            // matched delay
         float Q = hilbert(x);              // 90° shifted
 
-        // DDS
-        float shiftHz = knobToShiftHz();
-        uint32_t phaseInc = (uint32_t)llround((double)shiftHz * (double)((uint64_t)1 << PHASE_BITS) / (double)FS);
-        phase += phaseInc;
+        uint16_t knobRaw = static_cast<uint16_t>(KnobVal(X));
+        bool knobChanged = (knobRaw != lastKnobRaw);
+
+        if (controlCounter == 0 || knobChanged) {
+            lastKnobRaw = knobRaw;
+            updatePhaseIncrement(knobRaw);
+        }
+
+        if (++controlCounter >= CONTROL_UPDATE_SAMPLES) {
+            controlCounter = 0;
+        }
+
+        phase += cachedPhaseInc;
 
         float cs, sn;
         sincosLUT(phase, sn, cs);
@@ -126,6 +138,16 @@ private:
 
     uint32_t statusCounter = 0;
     bool statusLedOn = false;
+    uint16_t lastKnobRaw = 0;
+    uint32_t cachedPhaseInc = 0;
+    uint32_t controlCounter = 0;
+
+    void updatePhaseIncrement(uint16_t knobRaw) {
+        float shiftHz = knobToShiftHz(knobRaw);
+        float phaseIncF = roundf(shiftHz * PHASE_SCALE);
+        int32_t phaseIncSigned = static_cast<int32_t>(phaseIncF);
+        cachedPhaseInc = static_cast<uint32_t>(phaseIncSigned);
+    }
 };
 
 
