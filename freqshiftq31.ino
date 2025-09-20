@@ -1,3 +1,6 @@
+#ifdef USE_Q31_VARIANT
+// Fixed-point (Q31) implementation enabled when USE_Q31_VARIANT is defined.
+
 #include "ComputerCard.h"
 #include "arm_math.h"
 #include <cmath>
@@ -174,3 +177,5 @@ void setup() {
 void loop() {
     gFreqShift.Run();
 }
+
+#endif // USE_Q31_VARIANT
