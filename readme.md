@@ -1,20 +1,29 @@
 # Controls
-X : threshold for env
+X : frequency shift
+Y :
+Main :
 
 # Inputs
-AudioIn1 : sample input
+AudioIn1 : audio in
+AudioIn2 :
+CVIn1 :
+CVIn2 :
+PulseIn1 :
+PulseIn2 :
 # Outputs
-AudioOut1 : unquantized value
-AudioOut2 : quantized value
-CVOut1 : unquantized value
-CVOut2 : quantzed value
+AudioOut1 : shifted audio out
+AudioOut2 :
+CVOut1 :
+CVOut2 :
+PulseOut1 :
+PulseOut2 :
 
-PulseOut2 : Gate
+
 
 # LED
-0 : pitch detected between 20 and 2000 hz
+0 : 
 1 : 
-2 : Envelope higher than threshold (Gate)
+2 : 
 3 :
 4 :
-5:
+5 :
