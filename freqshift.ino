@@ -16,6 +16,8 @@ public:
     static constexpr int    FS        = 48000;     // sample rate
 
     static constexpr float  MAX_SHIFT = 4000.0f;   // Hz limit for knob mapping
+    static constexpr float  AUDIO_SCALE = 2048.0f;
+    static constexpr float  INV_AUDIO_SCALE = 1.0f / AUDIO_SCALE;
     static constexpr bool   UPPER_SB  = true;      // true=upper, false=lower
 
     // FIR state
@@ -41,7 +43,7 @@ public:
 
     // Main 48 kHz loop
     void ProcessSample() override {
-        float x = AudioIn1();              // input sample (−1..+1)
+        float x = AudioIn1() * INV_AUDIO_SCALE; // input sample scaled to (−1..+1)
         float I = pushDelay(x);            // matched delay
         float Q = hilbert(x);              // 90° shifted
 
@@ -57,10 +59,17 @@ public:
         float y = UPPER_SB ? (I * cs - Q * sn)
                            : (I * cs + Q * sn);
 
-        // Optional tiny limiter
-        if (y > 1.0f) y = 1.0f; else if (y < -1.0f) y = -1.0f;
+        float scaled = y * AUDIO_SCALE;
+        const float maxVal = AUDIO_SCALE - 1.0f;
+        const float minVal = -AUDIO_SCALE;
+        if (scaled > maxVal) {
+            scaled = maxVal;
+        } else if (scaled < minVal) {
+            scaled = minVal;
+        }
 
-        AudioOut1(y);
+        int16_t out = static_cast<int16_t>(scaled);
+        AudioOut1(out);
     }
 
 private:
