@@ -18,6 +18,15 @@ public:
     static constexpr float  MAX_SHIFT = 4000.0f;   // Hz limit for knob mapping
     static constexpr bool   UPPER_SB  = true;      // true=upper, false=lower
 
+    static constexpr uint32_t STATUS_LED_INDEX      = 0;                     // LED to flash
+    static constexpr uint32_t STATUS_TOGGLE_SAMPLES = FS / 2;                // toggle twice per second
+
+    void InitStatusLed() {
+        statusCounter = 0;
+        statusLedOn = false;
+        LedOff(STATUS_LED_INDEX);
+    }
+
     // FIR state
 
     float delayLine[HTAPS] = {0}; // circular buffer for FIR
@@ -61,6 +70,8 @@ public:
         if (y > 1.0f) y = 1.0f; else if (y < -1.0f) y = -1.0f;
 
         AudioOut1(y);
+
+        updateStatusLed();
     }
 
 private:
@@ -95,6 +106,17 @@ private:
         s = sinLUT[idx];
         c = sinLUT[idx90];
     }
+
+    void updateStatusLed() {
+        if (++statusCounter >= STATUS_TOGGLE_SAMPLES) {
+            statusCounter = 0;
+            statusLedOn = !statusLedOn;
+            LedOn(STATUS_LED_INDEX, statusLedOn);
+        }
+    }
+
+    uint32_t statusCounter = 0;
+    bool statusLedOn = false;
 };
 
 
@@ -134,6 +156,7 @@ FreqShifterFloat fs;
 
 void setup() {
     fs.EnableNormalisationProbe();
+    fs.InitStatusLed();
     buildHilbert();
     buildSinLUT();
 }
