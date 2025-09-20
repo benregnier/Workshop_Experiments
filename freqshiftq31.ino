@@ -112,7 +112,7 @@ private:
     }
 
     void buildHilbertQ31() {
-        constexpr double PI = 3.141592653589793238462643383279502884;
+        constexpr double kPi = 3.141592653589793238462643383279502884;
         const int mid = (HTAPS - 1) / 2;
         double coeffs[HTAPS];
 
@@ -120,9 +120,9 @@ private:
             int k = n - mid;
             double ideal = 0.0;
             if (k != 0 && (k & 1)) {
-                ideal = 2.0 / (PI * static_cast<double>(k));
+                ideal = 2.0 / (kPi * static_cast<double>(k));
             }
-            double w = 0.54 - 0.46 * std::cos(2.0 * PI * static_cast<double>(n) /
+            double w = 0.54 - 0.46 * std::cos(2.0 * kPi * static_cast<double>(n) /
                                               static_cast<double>(HTAPS - 1));
             coeffs[n] = ideal * w;
         }
@@ -146,9 +146,9 @@ private:
     }
 
     void buildSinLUT_Q31() {
-        constexpr double PI = 3.141592653589793238462643383279502884;
+        constexpr double kPi = 3.141592653589793238462643383279502884;
         for (int i = 0; i < LUTN; ++i) {
-            double angle = 2.0 * PI * static_cast<double>(i) / static_cast<double>(LUTN);
+            double angle = 2.0 * kPi * static_cast<double>(i) / static_cast<double>(LUTN);
             double s = std::sin(angle);
             sinLUT[i] = static_cast<q31_t>(std::llround(s * 2147483647.0));
         }
