@@ -1,0 +1,13 @@
+# Target labels
+ PioasmBuild
+# Source files and their labels
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/CMakeFiles/PioasmBuild
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/CMakeFiles/PioasmBuild.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/CMakeFiles/PioasmBuild-complete.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-build.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-configure.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-download.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-install.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-mkdir.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-patch.rule
+/Users/tom/Documents/GitHub/DYSKI/Firmware/RP2040/Computer_HelloWorld/build/pico-sdk/src/rp2_common/pico_cyw43_driver/pioasm/src/PioasmBuild-stamp/PioasmBuild-update.rule
