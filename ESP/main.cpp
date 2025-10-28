@@ -47,7 +47,7 @@ static const uint16_t ALPHA_Q15_32[32] = {
   13819,15738
 };
 static inline uint8_t map_knob_to_idx(uint16_t k) {
-  uint32_t idx = ((uint32_t)k * 31) / 1023;
+  uint32_t idx = ((uint32_t)k * 31) / 4095;
   return clampu8(idx, 31);
 }
 
@@ -133,15 +133,23 @@ public:
   ESPState esp;
   OneVOct  onev;
   uint32_t sm_hzQ16 = 0; // control-rate smoothed Hz (Q16.16)
+  uint32_t control_counter = 0;
+
+  static constexpr uint32_t kControlIntervalSamples = 240; // ~200 Hz
+
+  ESPCard() {
+    OneVOct_Init(onev);
+    UpdateControls();
+  }
 
   // ----- Control mapping -----
   void UpdateControls() {
-    uint16_t k1 = Knob1(); // 0..1023
-    uint16_t k2 = Knob2();
-    uint16_t k3 = Knob3();
+    uint16_t k1 = (uint16_t)KnobVal(Knob::Main); // 0..4095
+    uint16_t k2 = (uint16_t)KnobVal(Knob::X);
+    uint16_t k3 = (uint16_t)KnobVal(Knob::Y);
 
     // Preamp gain: 0.5x .. 32x using bit-doublings from 0.5 base
-    uint8_t steps = (k1 * 6) / 1023; // 0..6 doublings
+    uint8_t steps = (uint8_t)(((uint32_t)k1 * 6) / 4095); // 0..6 doublings
     uint16_t base = 128; // 0.5 in Q8.8
     uint32_t g = ((uint32_t)base) << steps;
     if (g > 0xFFFF) g = 0xFFFF;
@@ -202,14 +210,7 @@ public:
     return hzQ16;
   }
 
-  // ----- ComputerCard hooks -----
-  void Setup() override {
-    UpdateControls();
-    OneVOct_Init(onev);
-  }
-
-  // Run around 100–400 Hz by the framework
-  void ProcessControl() override {
+  void RunControlFrame() {
     UpdateControls();
 
     // Smooth the Hz estimate a bit (prevents warble)
@@ -233,6 +234,11 @@ public:
   }
 
   void ProcessSample() override {
+    if (++control_counter >= kControlIntervalSamples) {
+      control_counter = 0;
+      RunControlFrame();
+    }
+
     // Read mono input
     int16_t in = AudioIn1();
 
@@ -263,6 +269,8 @@ public:
     if (hzQ16) esp.pitch_hzQ16_16 = hzQ16;
 
     // Monitor: send band-passed audio out (or choose pre/in)
+    if (bp > 2047) bp = 2047;
+    else if (bp < -2048) bp = -2048;
     AudioOut1(bp);
   }
 };
