@@ -174,9 +174,13 @@ public:
 		// uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
 		// dl.setDelaySamplesFP16(lfo_fp16);
 		
-		// Ring Modulation
-		int16_t out1 = RingMod(delay1, in2);
-		int16_t out2 = RingMod(delay2, in2);
+		// Ring Modulatio
+		if (Connected(Input::Audio2)) {
+			int16_t out1 = RingMod(delay1, in2);
+			int16_t out2 = RingMod(delay2, in2);
+		} else {
+			int16_t out1 = delay1;
+			int16_t out2 = delay2;
 
 		// Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
 
@@ -216,9 +220,10 @@ int main()
 	dl1.setDelayMs(300);            // start at 300 ms
 	dl1.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
 	SmoothDelay dl2(48000, 1000);   // up to 1000 ms
-	dl2.setDelayMs(300);            // start at 300 ms
+	dl2.setDelayMs(500);            // start at 500 ms
 	dl2.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
 	Vink v;
+	v.EnableNormalizationProbe();
 	v.Run();
 }
 
