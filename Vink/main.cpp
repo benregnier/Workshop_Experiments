@@ -20,11 +20,11 @@
 
 		AudioIn1: Audio In
 		AudioIn2: Ring Modulator In (disconnects when not patched)
-		CVIn1: Main Knob control
-		CVIn2: Knob X control
-		Switch: Select split (Up) or shared (mom/down) output
+		(Future) CVIn1: Main Knob control
+		(Future) CVIn2: Knob X control
+		(Future) Switch: Select split (Up) or shared (mom/down) output
 		AudioOut1: Tap 1 or shared
-		AudioOut2: Tap 2 if split
+		(Future) AudioOut2: Tap 2 if split
 		(Optional) CVOut1 envelope follower signal from limiter?
 		
 */
@@ -223,10 +223,6 @@ private:
     uint32_t slew_step_fp16_{0};
 };
 
-// Vink State
-struct VinkState {
-};
-
 class Vink : public ComputerCard
 {
 public:
@@ -267,7 +263,6 @@ public:
             out1 = RingMod(delay1, in2);
             out2 = RingMod(delay2, in2);
         }
-        // Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
 
         // Mix delays and output
         int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
