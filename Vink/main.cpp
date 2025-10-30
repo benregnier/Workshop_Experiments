@@ -1,6 +1,7 @@
 #include "ComputerCard.h"
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <algorithm>
 
 /* Vink
@@ -30,6 +31,8 @@
 
 // Helper Functions
 
+
+
 static inline int16_t RingMod(int16_t a, int16_t b)
 {
     // Multiply 16-bit signed values and scale back to 16-bit range.
@@ -46,6 +49,82 @@ static inline int16_t sat16(int32_t x){
     if (x < -32768) return -32768;
     return (int16_t)x;
 }
+
+// One-pole envelope + fixed-ratio gain computer (Q15 domain)
+class FixedRatioLimiter {
+public:
+    // sampleRate: e.g., 48000
+    // attackMs/releaseMs: envelope times
+    // thresholdQ15: 0..32767 (e.g., 26214 ≈ 0.8 FS)
+    // ratio: 1=no compression, 4=4:1, 1000≈ limiter
+    FixedRatioLimiter(uint32_t sampleRate,
+                      float attackMs, float releaseMs,
+                      uint16_t thresholdQ15, uint16_t ratio)
+    : sr_(sampleRate), thr_(thresholdQ15), ratio_(ratio ? ratio : 1)
+    {
+        setTimes(attackMs, releaseMs);
+    }
+
+    // Change times later (computes Q15 coeffs once; floats not used in process())
+    void setTimes(float attackMs, float releaseMs){
+        atk_q15_ = timeToCoeffQ15(attackMs);
+        rel_q15_ = timeToCoeffQ15(releaseMs);
+    }
+
+    void setThresholdQ15(uint16_t thr){ thr_ = thr; }
+    void setRatio(uint16_t r){ ratio_ = (r ? r : 1); }
+
+    // Process one sample (int16_t Q15 audio)
+    inline int16_t process(int16_t x){
+        // 1) Peak envelope with attack/release smoothing (Q15 math)
+        uint16_t mag = (uint16_t)(x >= 0 ? x : (x == -32768 ? 32767 : -x)); // |x| in 0..32767
+        uint32_t diff;
+        if (mag > env_) {
+            diff = (uint32_t)mag - env_;
+            env_ += (uint32_t)((diff * atk_q15_) >> 15);
+        } else {
+            diff = (uint32_t)env_ - mag;
+            env_ -= (uint32_t)((diff * rel_q15_) >> 15);
+        }
+
+        // 2) Compute gain (Q15). If below threshold => unity
+        uint16_t gain_q15 = 32767;
+        if (env_ > thr_) {
+            // a = thr/env in Q15: ((thr<<15)/env)
+            uint16_t a = (uint16_t)(((uint32_t)thr_ << 15) / env_);
+            // Fixed-ratio law: out = thr + (env - thr)/ratio  => gain = out/env
+            // => gain = a + (1/ratio)*(1 - a)
+            uint16_t one_minus_a = (uint16_t)(32767 - a);
+            uint16_t term = (uint16_t)(one_minus_a / ratio_); // integer, cheap
+            gain_q15 = (uint16_t)(a + term);
+        }
+
+        // 3) Apply gain
+        int32_t y = ((int32_t)x * (int32_t)gain_q15) >> 15;
+        return sat16(y);
+    }
+
+    // Optional: clear envelope
+    void reset(){ env_ = 0; }
+
+private:
+    // Convert time constant to per-sample smoothing coeff in Q15:
+    // coeff = 1 - exp(-1/(tau * sr))  (performed once, out of the DSP loop)
+    uint16_t timeToCoeffQ15(float ms){
+        if (ms <= 0.0f) return 32767; // immediate
+        float tau = ms / 1000.0f;
+        float c = 1.0f - std::exp(-1.0f / (tau * (float)sr_));
+        if (c < 0.0f) c = 0.0f; if (c > 0.9999695f) c = 0.9999695f; // clamp to <1
+        return (uint16_t)(c * 32767.0f + 0.5f);
+    }
+
+    uint32_t sr_;
+    uint16_t thr_{26214};    // ~0.8 FS by default
+    uint16_t ratio_{1000};   // ≈ limiter by default
+    uint16_t atk_q15_{1638}; // ~50 ms at 48 kHz default-ish
+    uint16_t rel_q15_{328};  // ~250 ms default-ish
+    uint16_t env_{0};        // envelope in Q15 (0..32767)
+};
 
 class SmoothDelay {
 public:
@@ -186,10 +265,10 @@ public:
 
 		// Mix delays and output
 		int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
-		AudioOut1(out);
 		
-		// Todo: Implement limiter
-
+		// Limit
+		int16_t outlim = lim.process(out);
+		AudioOut1(outlim);
 		
 		// Transfer audio/CV/Pulse inputs directly to outputs
 
@@ -222,6 +301,7 @@ int main()
 	SmoothDelay dl2(48000, 1000);   // up to 1000 ms
 	dl2.setDelayMs(500);            // start at 500 ms
 	dl2.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
+	FixedRatioLimiter lim(48000, 1.0f, 100.0f, 29491, 1000); // thr ≈ 0.9 FS, limiter
 	Vink v;
 	v.EnableNormalizationProbe();
 	v.Run();
