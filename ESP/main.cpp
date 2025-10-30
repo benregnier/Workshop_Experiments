@@ -4,7 +4,7 @@
 #include <limits.h>
 
 /*
-  Workshop Computer — MS-20-style ESP (integer-only) with 1 V/oct CV on CVOutMillivolts()
+  Workshop Computer — MS-20-style External Signal Processor with 1 V/oct CV
 
   Blocks:
     - Preamp (Q8.8 gain, integer soft clip)
@@ -18,6 +18,12 @@
     Knob1: Preamp gain (0.5x .. 32x, exponential)
     Knob2: HP cutoff (index into alpha LUT, ~20 Hz .. ~5 kHz)
     Knob3: LP cutoff (index into alpha LUT, forced >= HP+1)
+
+  Input and Output Mapping:
+  AudioOut1: Bandpassed audio
+  CVOut1 : 1 V/oct pitch
+  CVOut2 : envelope
+  
 */
 
 // ================= Fixed-point helpers =================
@@ -229,8 +235,8 @@ public:
     }
 
     // Optional: output envelope as CV2 in mV (0..5 V). Here we map Q15 to 0..5 V linearly.
-    // int32_t env_mv = ( (int32_t)esp.env_out * CV_FULL_SCALE_MV ) >> 15;
-    // (void)CVOutMillivolts(1, env_mv);
+      int32_t env_mv = ( (int32_t)esp.env_out * CV_FULL_SCALE_MV ) >> 15;
+      (void)CVOutMillivolts(1, env_mv);
   }
 
   void ProcessSample() override {
@@ -262,7 +268,9 @@ public:
     // Gate (Schmitt) from envelope
     if (!esp.gate && (uint16_t)esp.env_out >= esp.trig_on_Q15) esp.gate = true;
     else if (esp.gate && (uint16_t)esp.env_out <= esp.trig_off_Q15) esp.gate = false;
-    esp.trig_out = esp.gate ? 32767 : 0;
+    // esp.trig_out = esp.gate ? 32767 : 0;
+    PulseOut1(esp.gate);
+    LEDOn(4, esp.gate);
 
     // Pitch estimate (update on crossings)
     uint32_t hzQ16 = PitchZC(bp);
@@ -272,12 +280,12 @@ public:
     if (bp > 2047) bp = 2047;
     else if (bp < -2048) bp = -2048;
     AudioOut1(bp);
+    LEDBrightness(0, bp + 2048);
   }
 };
 
-// ---- Factory hook: create our card for the firmware ----
-// If your build system expects a factory function, keep this.
-// Otherwise, your project’s main may instantiate ESPCard directly.
-extern "C" ComputerCard* CreateComputerCard() {
-  return new ESPCard();
+int main()
+{
+  ESPCard esp;
+  esp.Run();
 }
