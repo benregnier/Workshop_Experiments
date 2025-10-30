@@ -230,68 +230,68 @@ struct VinkState {
 class Vink : public ComputerCard
 {
 public:
-	VinkState vink;
+    Vink()
+        : dl1_(48000, 1000),
+          dl2_(48000, 1000),
+          lim_(48000, 1.0f, 100.0f, 29491, 1000)
+    {
+        dl1_.setDelayMs(300);
+        dl1_.setSlewPerSecondMs(200.0f);
+        dl2_.setDelayMs(500);
+        dl2_.setSlewPerSecondMs(200.0f);
+    }
 
-	Vink(){
-	};
+    void ProcessSample() override
+    {
+        // 2 delay lines
+        int16_t in1 = AudioIn1();
+        int16_t in2 = AudioIn2();
+        int16_t delay1 = dl1_.process(in1);  // delayed only (you mix elsewhere)
+        int16_t delay2 = dl2_.process(in1);
 
-	virtual void ProcessSample()
-	{
+        // Modulate without clicks (two common options):
+        // A) Block-by-block sweep (slew handles smoothing)
+        // //uint16_t newDelayMs1 = (KnobVal(Knob::X) * 1000u) / 4095u
+        // dl1_.setDelayMs(newDelayMs1);
+        //uint16_t newDelayMs2 = (KnobVal(Knob::Y) * 1000u) / 4095u
+        // dl2_.setDelayMs(newDelayMs2);
 
-		// 2 delay lines
-		int16_t in1 = AudioIn1();
-		int16_t in2 = AudioIn2();
-		int16_t delay1 = dl1.process(in1);  // delayed only (you mix elsewhere)
-		int16_t delay2 = dl2.process(in1);
+        // B) Per-sample LFO in samples with 16.16 precision (still smoothed)
+        // uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
+        // dl.setDelaySamplesFP16(lfo_fp16);
 
+        // Ring Modulation
+        int16_t out1 = delay1;
+        int16_t out2 = delay2;
+        if (Connected(Input::Audio2)) {
+            out1 = RingMod(delay1, in2);
+            out2 = RingMod(delay2, in2);
+        }
+        // Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
 
-		// Modulate without clicks (two common options):
-		// A) Block-by-block sweep (slew handles smoothing)
-		// //uint16_t newDelayMs1 = (KnobVal(Knob::X) * 1000u) / 4095u
-		// dl1.setDelayMs(newDelayMs1);
-		//uint16_t newDelayMs2 = (KnobVal(Knob::Y) * 1000u) / 4095u
-		// dl2.setDelayMs(newDelayMs2);
-	
-		// B) Per-sample LFO in samples with 16.16 precision (still smoothed)
-		// uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
-		// dl.setDelaySamplesFP16(lfo_fp16);
-		
-		// Ring Modulation
-		if (Connected(Input::Audio2)) {
-			int16_t out1 = RingMod(delay1, in2);
-			int16_t out2 = RingMod(delay2, in2);
-		} else {
-			int16_t out1 = delay1;
-			int16_t out2 = delay2;
-		};
-		// Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
+        // Mix delays and output
+        int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
 
-		// Mix delays and output
-		int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
-		
-		// Limit
-		//uint16_t thrQ15 = (KnobVal(Knob::Main) * 32767u) / 4095u;
-		//lim.setThresholdQ15(thrQ15);
-		int16_t outlim = lim.process(out);
-		AudioOut1(outlim);
-		
-	}
+        // Limit
+        //uint16_t thrQ15 = (KnobVal(Knob::Main) * 32767u) / 4095u;
+        //lim_.setThresholdQ15(thrQ15);
+        int16_t outlim = lim_.process(out);
+        AudioOut1(outlim);
+    }
+
+private:
+    SmoothDelay dl1_;
+    SmoothDelay dl2_;
+    FixedRatioLimiter lim_;
+    VinkState vink_;
 };
 
 
 int main()
 {
-	// Init delays
-	SmoothDelay dl1(48000, 1000);   // up to 1000 ms
-	dl1.setDelayMs(300);            // start at 300 ms
-	dl1.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
-	SmoothDelay dl2(48000, 1000);   // up to 1000 ms
-	dl2.setDelayMs(500);            // start at 500 ms
-	dl2.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
-	FixedRatioLimiter lim(48000, 1.0f, 100.0f, 29491, 1000); // thr ≈ 0.9 FS, limiter
-	Vink v;
-	v.EnableNormalizationProbe();
-	v.Run();
+    Vink v;
+    v.EnableNormalizationProbe();
+    v.Run();
 }
 
   
