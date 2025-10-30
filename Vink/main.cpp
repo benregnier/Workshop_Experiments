@@ -247,7 +247,10 @@ public:
 
 		// Modulate without clicks (two common options):
 		// A) Block-by-block sweep (slew handles smoothing)
-		// dl.setDelayMs(newDelayMs);
+		// //uint16_t newDelayMs1 = (KnobVal(Knob::X) * 1000u) / 4095u
+		// dl1.setDelayMs(newDelayMs1);
+		//uint16_t newDelayMs2 = (KnobVal(Knob::Y) * 1000u) / 4095u
+		// dl2.setDelayMs(newDelayMs2);
 	
 		// B) Per-sample LFO in samples with 16.16 precision (still smoothed)
 		// uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
@@ -267,27 +270,11 @@ public:
 		int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
 		
 		// Limit
+		//uint16_t thrQ15 = (KnobVal(Knob::Main) * 32767u) / 4095u;
+		//lim.setThresholdQ15(thrQ15);
 		int16_t outlim = lim.process(out);
 		AudioOut1(outlim);
 		
-		// Transfer audio/CV/Pulse inputs directly to outputs
-
-		CVOut1(CVIn1());
-		CVOut2(CVIn2());
-
-		PulseOut1(PulseIn1());
-		PulseOut2(PulseIn2());
-
-		// Get switch position and set LEDs 0, 2, 4 accordingly
-		int s = SwitchVal();
-		LedOn(4, s == Switch::Down);
-		LedOn(2, s == Switch::Middle);
-		LedOn(0, s == Switch::Up);
-
-		// Set LED 1, 3, 5 brightness to knob values
-		LedBrightness(1, KnobVal(Knob::Main));
-		LedBrightness(3, KnobVal(Knob::X));
-		LedBrightness(5, KnobVal(Knob::Y));
 	}
 };
 
