@@ -241,8 +241,8 @@ public:
 		// 2 delay lines
 		int16_t in1 = AudioIn1();
 		int16_t in2 = AudioIn2();
-		int16_t delay1 = dl1.process(in);  // delayed only (you mix elsewhere)
-		int16_t delay2 = dl2.process(in);
+		int16_t delay1 = dl1.process(in1);  // delayed only (you mix elsewhere)
+		int16_t delay2 = dl2.process(in1);
 
 
 		// Modulate without clicks (two common options):
@@ -256,14 +256,14 @@ public:
 		// uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
 		// dl.setDelaySamplesFP16(lfo_fp16);
 		
-		// Ring Modulatio
+		// Ring Modulation
 		if (Connected(Input::Audio2)) {
 			int16_t out1 = RingMod(delay1, in2);
 			int16_t out2 = RingMod(delay2, in2);
 		} else {
 			int16_t out1 = delay1;
 			int16_t out2 = delay2;
-
+		};
 		// Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
 
 		// Mix delays and output
