@@ -131,6 +131,8 @@ struct ESPState {
   int16_t env_out = 0;           // Q15 envelope
   int16_t trig_out = 0;          // 0 or 32767
   uint32_t pitch_hzQ16_16 = 0;   // Hz in Q16.16 (updated on new ZC)
+  int32_t pitch_mv = 0;          // cached millivolts for CVOut1
+  uint16_t pitch_led = 0;        // brightness for LED 4
 };
 
 // ================= ESP processing =================
@@ -229,14 +231,13 @@ public:
     if (sm_hzQ16) {
       int32_t vQ16 = OneVOct_VoltsQ16(onev, sm_hzQ16); // Hz -> volts (Q16.16)
       int32_t mv   = VoltsQ16_to_mV(vQ16);             // volts -> millivolts (int)
-      // Send calibrated 1 V/oct to CV output 1 (channel index 0)
-      // Returns 'limited' if rail-clamped; ignore or indicate via LED if you like.
-      (void)CVOutMillivolts(0, mv);
+      esp.pitch_mv = mv;
+      esp.pitch_led = (uint16_t)(((uint32_t)mv * 4095) / CV_FULL_SCALE_MV);
     }
-
-    // Optional: output envelope as CV2 in mV (0..5 V). Here we map Q15 to 0..5 V linearly.
-      int32_t env_mv = ( (int32_t)esp.env_out * CV_FULL_SCALE_MV ) >> 15;
-      (void)CVOutMillivolts(1, env_mv);
+    else {
+      esp.pitch_mv = 0;
+      esp.pitch_led = 0;
+    }
   }
 
   void ProcessSample() override {
@@ -270,11 +271,21 @@ public:
     else if (esp.gate && (uint16_t)esp.env_out <= esp.trig_off_Q15) esp.gate = false;
     // esp.trig_out = esp.gate ? 32767 : 0;
     PulseOut1(esp.gate);
-    LEDOn(4, esp.gate);
+    LEDOn(3, esp.gate);
 
     // Pitch estimate (update on crossings)
     uint32_t hzQ16 = PitchZC(bp);
     if (hzQ16) esp.pitch_hzQ16_16 = hzQ16;
+
+    // Calibrated CV outs and indicators
+    (void)CVOutMillivolts(0, esp.pitch_mv);
+    LEDBrightness(4, esp.pitch_led);
+
+    uint16_t envQ15 = (uint16_t)esp.env_out;
+    int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
+    (void)CVOutMillivolts(1, env_mv);
+    uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
+    LEDBrightness(5, env_led);
 
     // Monitor: send band-passed audio out (or choose pre/in)
     if (bp > 2047) bp = 2047;
