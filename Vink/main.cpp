@@ -1,4 +1,7 @@
 #include "ComputerCard.h"
+#include <cstdint>
+#include <cstring>
+#include <algorithm>
 
 /* Vink
 	Dual delay loops + ring mod with a limiter for Jaap Vink / Roland Kayn style feedback patching 
@@ -26,9 +29,17 @@
 */
 
 // Helper Functions
-#include <cstdint>
-#include <cstring>
-#include <algorithm>
+
+static inline int16_t RingMod(int16_t a, int16_t b)
+{
+    // Multiply 16-bit signed values and scale back to 16-bit range.
+    // Using 32-bit intermediate avoids overflow.
+    int32_t prod = (int32_t)a * (int32_t)b;   // range: ±(32768²)
+    prod >>= 15;                              // Q15 scaling back to ±32767
+    if (prod >  32767) prod =  32767;
+    if (prod < -32768) prod = -32768;
+    return (int16_t)prod;
+}
 
 static inline int16_t sat16(int32_t x){
     if (x >  32767) return  32767;
@@ -148,10 +159,12 @@ public:
 	virtual void ProcessSample()
 	{
 
-		// Todo: Implement Delay lines
-		int16_t in  = AudioIn1();
-		int16_t out = dl.process(in);  // delayed only (you mix elsewhere)
-		AudioOut1(out);
+		// 2 delay lines
+		int16_t in1 = AudioIn1();
+		int16_t in2 = AudioIn2();
+		int16_t delay1 = dl1.process(in);  // delayed only (you mix elsewhere)
+		int16_t delay2 = dl2.process(in);
+
 
 		// Modulate without clicks (two common options):
 		// A) Block-by-block sweep (slew handles smoothing)
@@ -162,7 +175,16 @@ public:
 		// dl.setDelaySamplesFP16(lfo_fp16);
 		
 		// Todo: Implement ring modulation
+		int16_t out1 = RingMod(delay1, in2);
+		int16_t out2 = RingMod(delay2, in2);
+		
+
+		// Mix delays and output
+		int16_t out = (int16_t)(((int32_t)ring1 + (int32_t)ring2) >> 1);
+		AudioOut1(out);
+		
 		// Todo: Implement limiter
+
 		
 		// Transfer audio/CV/Pulse inputs directly to outputs
 
@@ -189,9 +211,12 @@ public:
 int main()
 {
 	// Init delays
-	SmoothDelay dl(48000, 1000);   // up to 1000 ms
-	dl.setDelayMs(300);            // start at 300 ms
-	dl.setSlewPerSecondMs(200.0f); // optional: ~0.2 ms change per ms of audio
+	SmoothDelay dl1(48000, 1000);   // up to 1000 ms
+	dl1.setDelayMs(300);            // start at 300 ms
+	dl1.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
+	SmoothDelay dl2(48000, 1000);   // up to 1000 ms
+	dl2.setDelayMs(300);            // start at 300 ms
+	dl2.setSlewPerSecondMs(200.0f); //pti oonal: ~0.2 ms change per ms of audio
 	Vink v;
 	v.Run();
 }
