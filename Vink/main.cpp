@@ -174,13 +174,14 @@ public:
 		// uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
 		// dl.setDelaySamplesFP16(lfo_fp16);
 		
-		// Todo: Implement ring modulation
+		// Ring Modulation
 		int16_t out1 = RingMod(delay1, in2);
 		int16_t out2 = RingMod(delay2, in2);
-		
+
+		// Todo: implement jack normalization so ring mod is not done if no jack present in AudioIn2
 
 		// Mix delays and output
-		int16_t out = (int16_t)(((int32_t)ring1 + (int32_t)ring2) >> 1);
+		int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
 		AudioOut1(out);
 		
 		// Todo: Implement limiter
