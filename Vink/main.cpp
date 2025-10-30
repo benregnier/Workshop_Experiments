@@ -41,6 +41,11 @@ public:
 	
 	virtual void ProcessSample()
 	{
+
+		// Todo: Implement Delay lines
+		// Todo: Implement ring modulation
+		// Todo: Implement limiter
+		
 		// Transfer audio/CV/Pulse inputs directly to outputs
 		AudioOut1(AudioIn1());
 		AudioOut2(AudioIn2());
