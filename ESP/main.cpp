@@ -14,15 +14,18 @@
     - Pitch estimator (zero-crossing w/ hysteresis)
     - 1 V/oct fixed-point log2 → millivolts → CVOutMillivolts(0, mV)
 
-  Knob mapping (adjust in UpdateControls()):
+  Control mapping (adjust in UpdateControls()):
     Knob1: Preamp gain (0.5x .. 32x, exponential)
     Knob2: HP cutoff (index into alpha LUT, ~20 Hz .. ~5 kHz)
     Knob3: LP cutoff (index into alpha LUT, forced >= HP+1)
 
+    Switch: When set to middle, updates only when gate is high, otherwise continuous
+
   Input and Output Mapping:
-  AudioOut1: Bandpassed audio
-  CVOut1 : 1 V/oct pitch
-  CVOut2 : envelope
+    AudioOut1: Bandpassed audio
+    CVOut1 : 1 V/oct pitch
+    CVOut2 : envelope
+    Pulse1 : gate
   
 */
 
@@ -64,7 +67,7 @@ static inline uint8_t map_knob_to_idx(uint16_t k) {
 // ================= 1 V/oct fixed-point (Hz Q16.16 → mV int) =================
 #define ONEVOCT_REF_HZ        440
 #define ONEVOCT_REF_VOLTS_Q16 ((4<<16) + 0xC000)  // 4.75 V in Q16.16
-#define CV_FULL_SCALE_MV      5000                // rail for clamping
+#define CV_FULL_SCALE_MV      8000                // rail for clamping
 
 static inline uint32_t q16_from_u32(uint32_t x){ return x<<16; }
 static inline int32_t  q16_mul32(int32_t a,int32_t b){ return (int32_t)(((int64_t)a*(int64_t)b)>>16); }
@@ -123,15 +126,15 @@ struct ESPState {
   int16_t env = 0;
   uint8_t env_attack_idx = 20; // faster
   uint8_t env_release_idx = 6; // slower
-  uint16_t trig_on_Q15  = 3000;  // ~9% FS
-  uint16_t trig_off_Q15 = 1500;  // ~4.6% FS
+  uint16_t trig_on_Q15  = 1500;  // ~9% FS
+  uint16_t trig_off_Q15 = 500;  // ~4.6% FS
   bool gate = false;
 
   // Pitch (zero-crossing with hysteresis)
   int32_t n = 0;
   int32_t zc_last_cross_n = 0;
-  int16_t zc_pos_thresh = 1200;
-  int16_t zc_neg_thresh = -1200;
+  int16_t zc_pos_thresh = 2000;
+  int16_t zc_neg_thresh = -2000;
   bool zc_was_pos = false;
 
   // Outputs
@@ -217,7 +220,7 @@ public:
       int32_t period = esp.n - esp.zc_last_cross_n;
       esp.zc_last_cross_n = esp.n;
       // plausible period window: ~60..1500 Hz at 48k → 32..800 samples
-      if (period > 32 && period < 800) {
+      if (period > 16 && period < 800) {
         hzQ16 = ((uint32_t)48000 << 16) / (uint32_t)period;
       }
     }
@@ -274,7 +277,7 @@ public:
     esp.env_out = esp.env;
 
     // Gate (Schmitt) from envelope
-    if (!esp.gate && (uint16_t)esp.env_out >= esp.trig_on_Q15) esp.gate = true;
+    if (!esp.gate && (uint16_t)esp.env_out > esp.trig_on_Q15) esp.gate = true;
     else if (esp.gate && (uint16_t)esp.env_out <= esp.trig_off_Q15) esp.gate = false;
     // esp.trig_out = esp.gate ? 32767 : 0;
     PulseOut1(esp.gate);
@@ -282,17 +285,25 @@ public:
 
     // Pitch estimate (update on crossings)
     uint32_t hzQ16 = PitchZC(bp);
-    if (hzQ16) esp.pitch_hzQ16_16 = hzQ16;
+    if ((SwitchVal() != Switch::Middle) || esp.gate) {
+      if (hzQ16) esp.pitch_hzQ16_16 = hzQ16;
+    };
+    
 
-    // Calibrated CV outs and indicators
+    // Pitch CV outs
     (void)CVOutMillivolts(0, esp.pitch_mv);
     LedBrightness(2, esp.pitch_led);
 
-    uint16_t envQ15 = (uint16_t)esp.env_out;
-    int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
-    (void)CVOutMillivolts(1, env_mv);
-    uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
-    LedBrightness(4, env_led);
+    // Envelope Out
+    //uint16_t envQ15 = (uint16_t)esp.env_out;
+    //int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
+    //(void)CVOutMillivolts(1, env_mv);
+    //uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
+    if (esp.env_out > 2047) esp.env_out = 2047;
+    if (esp.env_out < 0 ) esp.env_out = 0;
+    CVOut2(esp.env_out);
+    int16_t env_led = esp.env_out * 2;
+    LedBrightness(3, env_led);
 
     // Monitor: send band-passed audio out (or choose pre/in)
     if (bp > 2047) bp = 2047;
