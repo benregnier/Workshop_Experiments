@@ -114,7 +114,8 @@ private:
         if (ms <= 0.0f) return 32767; // immediate
         float tau = ms / 1000.0f;
         float c = 1.0f - std::exp(-1.0f / (tau * (float)sr_));
-        if (c < 0.0f) c = 0.0f; if (c > 0.9999695f) c = 0.9999695f; // clamp to <1
+        if (c < 0.0f) c = 0.0f; 
+        if (c > 0.9999695f) c = 0.9999695f; // clamp to <1
         return (uint16_t)(c * 32767.0f + 0.5f);
     }
 
@@ -278,14 +279,13 @@ private:
     SmoothDelay dl1_;
     SmoothDelay dl2_;
     FixedRatioLimiter lim_;
-    VinkState vink_;
 };
 
 
 int main()
 {
     Vink v;
-    v.EnableNormalizationProbe();
+    v.EnableNormalisationProbe();
     v.Run();
 }
 

@@ -32,6 +32,10 @@ static inline int16_t sat16(int32_t x) {
   if (x < -32768) return -32768;
   return (int16_t)x;
 }
+static inline int16_t abs16(int16_t x) {
+    int16_t mask = x >> 15;        // 0x0000 if x >= 0, 0xFFFF if x < 0
+    return (x + mask) ^ mask;      // if negative → (~x + 1), else → x
+}
 static inline int16_t q15_mul(int16_t a, int16_t b) { // (a*b)>>15
   return (int16_t)((int32_t)a * (int32_t)b >> 15);
 }
@@ -132,7 +136,7 @@ struct ESPState {
   int16_t trig_out = 0;          // 0 or 32767
   uint32_t pitch_hzQ16_16 = 0;   // Hz in Q16.16 (updated on new ZC)
   int32_t pitch_mv = 0;          // cached millivolts for CVOut1
-  uint16_t pitch_led = 0;        // brightness for LED 4
+  uint16_t pitch_led = 0;        // brightness for LED 2
 };
 
 // ================= ESP processing =================
@@ -271,7 +275,7 @@ public:
     else if (esp.gate && (uint16_t)esp.env_out <= esp.trig_off_Q15) esp.gate = false;
     // esp.trig_out = esp.gate ? 32767 : 0;
     PulseOut1(esp.gate);
-    LEDOn(3, esp.gate);
+    LedOn(4, esp.gate);
 
     // Pitch estimate (update on crossings)
     uint32_t hzQ16 = PitchZC(bp);
@@ -279,19 +283,19 @@ public:
 
     // Calibrated CV outs and indicators
     (void)CVOutMillivolts(0, esp.pitch_mv);
-    LEDBrightness(4, esp.pitch_led);
+    LedBrightness(2, esp.pitch_led);
 
     uint16_t envQ15 = (uint16_t)esp.env_out;
     int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
     (void)CVOutMillivolts(1, env_mv);
     uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
-    LEDBrightness(5, env_led);
+    LedBrightness(4, env_led);
 
     // Monitor: send band-passed audio out (or choose pre/in)
     if (bp > 2047) bp = 2047;
     else if (bp < -2048) bp = -2048;
     AudioOut1(bp);
-    LEDBrightness(0, bp + 2048);
+    LedBrightness(0, abs16(bp)*2);
   }
 };
 
@@ -299,4 +303,5 @@ int main()
 {
   ESPCard esp;
   esp.Run();
+  esp.EnableNormalisationProbe();
 }
