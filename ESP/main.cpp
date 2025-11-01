@@ -76,16 +76,19 @@ static inline int32_t floor_log2_u32(uint32_t x){ int32_t n=-1; while(x){ x>>=1;
 // log2(x_Q16) → Q16.16 using cubic approx on [1,2)
 static inline int32_t log2_q16(uint32_t xQ16){
   if(!xQ16) return INT32_MIN/2;
-  int32_t n = floor_log2_u32(xQ16);
-  uint32_t yQ16 = xQ16 >> n;                 // [1,2)
-  int32_t fQ16  = (int32_t)yQ16 - (1<<16);   // f in [0,1)
-  const int32_t a1=1549082003, a2=-774541002, a3=516360263; // Q2.30 coeffs
+  int32_t exp = floor_log2_u32(xQ16);
+  int32_t n = exp - 16;                       // integer part of log2(x_Q16/2^16)
+  uint32_t yQ16;
+  if (n >= 0) yQ16 = xQ16 >> n;               // keep Q16.16 mantissa in [1,2)
+  else        yQ16 = xQ16 << (-n);
+  int32_t fQ16  = (int32_t)yQ16 - (1<<16);    // f in [0,1)
+  const int32_t a1=1528445166, a2=-631032126, a3=177730538; // Q2.30 coeffs
   int32_t fQ30  = fQ16 << 14;
   int32_t f2Q30 = q30_mul(fQ30, fQ30);
   int32_t f3Q30 = q30_mul(f2Q30, fQ30);
   int32_t polyQ30 = q30_mul(a1,fQ30) + q30_mul(a2,f2Q30) + q30_mul(a3,f3Q30);
   int32_t polyQ16 = polyQ30 >> 14;
-  return (n<<16) + polyQ16 - (16<<16);
+  return (n<<16) + polyQ16;
 }
 
 struct OneVOct {
