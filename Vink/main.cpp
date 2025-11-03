@@ -29,8 +29,74 @@
 		
 */
 
-// Helper Functions
+// ---------- helpers ----------
+static inline int16_t sat16(int32_t x){ if(x>32767) return 32767; if(x<-32768) return -32768; return (int16_t)x; }
+static inline int16_t sat12(int32_t x){ if(x>2047) return 2047; if(x<-2048) return -2048; return (int16_t)x; }
+static inline int16_t mul_q15(int16_t a, int16_t b){ return (int16_t)(((int32_t)a * (int32_t)b) >> 15); }
 
+// One-pole (state-space) lowpass: y += a*(x - y), a in Q15
+struct OnePoleLP {
+    int16_t y = 0;         // state in Q15
+    uint16_t a = 0;        // coeff Q15 (0..32767), ~cutoff control
+    inline int16_t process(int16_t x){
+        int16_t diff = (int16_t)(x - y);
+        y = (int16_t)(y + ((int32_t)diff * a >> 15));
+        return y;
+    }
+    void clear(){ y = 0; }
+};
+
+// Highpass via “x - lowpass(x)”
+struct OnePoleHP {
+    OnePoleLP lp;
+    inline int16_t process(int16_t x){
+        int16_t lo = lp.process(x);
+        return (int16_t)(x - lo);
+    }
+    void clear(){ lp.clear(); }
+};
+
+// ---------- soft clipper (tape-ish) ----------
+// Cubic soft clip: y = x - (x^3)/3, all in Q15.
+// Drive boosts input into curve; makeup = post-gain.
+struct TapeSaturator {
+    // Controls (Q15): 32767 ≈ 1.0
+    uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
+    uint16_t makeupQ15  = 16384;  // bring level back after clipping
+    int16_t  biasQ15    = 0;      // small DC bias for asymmetry (e.g., ±1024)
+
+    // Pre/post filters
+    OnePoleHP preHP;    // pre-emphasis (boost highs into nonlinearity)
+    OnePoleLP postLP;   // de-emphasis / anti-alias
+
+    // Process one sample (Q15 int16)
+    inline int16_t process(int16_t x){
+        // 1) pre-emphasis (subtle)
+        int16_t pre = preHP.process(x);
+
+        // 2) add small bias for asymmetry
+        int32_t z = (int32_t)pre + (int32_t)biasQ15;
+        z = sat16(z);
+
+        // 3) apply drive (Q15 gain)
+        int16_t d = mul_q15((int16_t)z, (int16_t)driveQ15);
+
+        // 4) cubic soft clip in Q15: y = d - (d^3)/3
+        //    d2 = (d*d)>>15, d3 = (d2*d)>>15
+        int32_t d2 = ((int32_t)d * (int32_t)d) >> 15;
+        int32_t d3 = (d2 * d) >> 15;
+        int32_t y  = (int32_t)d - (d3 / 3);     // good integer approx of tanh-ish
+
+        // 5) makeup gain
+        y = ((y * (int32_t)makeupQ15) >> 15);
+
+        // 6) post lowpass to smooth HF crud
+        int16_t out = postLP.process(sat16(y));
+        return out;
+    }
+
+    void clear(){ preHP.clear(); postLP.clear(); }
+};
 
 
 static inline int16_t RingMod(int16_t a, int16_t b)
@@ -42,12 +108,6 @@ static inline int16_t RingMod(int16_t a, int16_t b)
     if (prod >  32767) prod =  32767;
     if (prod < -32768) prod = -32768;
     return (int16_t)prod;
-}
-
-static inline int16_t sat16(int32_t x){
-    if (x >  32767) return  32767;
-    if (x < -32768) return -32768;
-    return (int16_t)x;
 }
 
 // One-pole envelope + fixed-ratio gain computer (Q15 domain)
@@ -198,7 +258,7 @@ public:
         // y = (x0*(1-f) + x1*f), f in [0..1) as 16-bit fraction
         uint32_t f = delayFrac;
         int32_t y  = ( (x0 * (int32_t)(65536u - f)) + (x1 * (int32_t)f) ) >> 16;
-        int16_t out = sat16(y);
+        int16_t out = sat12(y);
 
         // 4) Write current input and advance
         buffer_[w_] = in;
