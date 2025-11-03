@@ -1,6 +1,6 @@
 ![Music Thing Workshop System with headphones](https://www.musicthing.co.uk/images/900-workshopsystem-full-straight-headphones-colour-2.jpg)
 
-# Workshop Computer  
+# Workshop Computer Experiments - Ben Regnier
 
 These are my test cards for the Workshop System
 [Music Thing Workshop System Homepage](https://www.musicthing.co.uk/workshopsystem/)  
