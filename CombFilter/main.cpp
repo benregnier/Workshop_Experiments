@@ -1,6 +1,16 @@
 #include "ComputerCard.h"
 #include <stdint.h>
 
+/// Comb Filter
+//  Proof of concept for audio development
+//  Delay range of 1 - 30 ms
+//  Knob::Main Sets Delay Range
+//  Knob::X is tone/damping
+//  Knob::Y is feedback
+//  AudioIn1 for Audio
+//  AudioOut1 for Audio
+//  With the switch up, allows for 1v/oct input on CV1 for karplus fun
+
 // --- Q15 helpers ---
 static inline int16_t sat16(int32_t v) {
     if (v >  32767) return  32767;
