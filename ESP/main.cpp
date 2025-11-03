@@ -4,24 +4,25 @@
 #include <limits.h>
 
 /*
-  Workshop Computer — MS-20-style External Signal Processor with 1 V/oct CV
+  Workshop Computer — MS-20-style External Signal Processor 
 
   Blocks:
-    - Preamp (Q8.8 gain, integer soft clip)
-    - HP + LP → Band-pass (one-pole each; alphas from LUT for 48 kHz)
+    - Preamp (x0.5 to x32 gain with soft clipping)
+    - Adjustable bandpass filter
     - Envelope follower (rectify + separate attack/release)
     - Gate (Schmitt) from envelope
     - Pitch estimator (zero-crossing w/ hysteresis)
-    - 1 V/oct fixed-point log2 → millivolts → CVOutMillivolts(0, mV)
+    - 1V/oct output
 
   Control mapping (adjust in UpdateControls()):
     Knob1: Preamp gain (0.5x .. 32x, exponential)
-    Knob2: HP cutoff (index into alpha LUT, ~20 Hz .. ~5 kHz)
-    Knob3: LP cutoff (index into alpha LUT, forced >= HP+1)
+    Knob2: HP cutoff (~20 Hz .. ~5 kHz)
+    Knob3: LP cutoff (~20 Hz .. ~5 kHz pegged to hp cutoff)
 
-    Switch: When set to middle, updates only when gate is high, otherwise continuous
+    Switch: When set to middle, pitch updates only when gate is high, otherwise continuous
 
   Input and Output Mapping:
+    AudioIn2: Audio In
     AudioOut1: Bandpassed audio
     CVOut1 : 1 V/oct pitch
     CVOut2 : envelope

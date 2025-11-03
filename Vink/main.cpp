@@ -102,8 +102,7 @@ public:
         // 3) Apply gain
         int32_t y = ((int32_t)x * (int32_t)gain_q15) >> 15;
         return sat16(y);
-    }
-
+    }     
     // Optional: clear envelope
     void reset(){ env_ = 0; }
 
@@ -248,10 +247,10 @@ public:
 
         // Modulate without clicks (two common options):
         // A) Block-by-block sweep (slew handles smoothing)
-        // //uint16_t newDelayMs1 = (KnobVal(Knob::X) * 1000u) / 4095u
-        // dl1_.setDelayMs(newDelayMs1);
-        //uint16_t newDelayMs2 = (KnobVal(Knob::Y) * 1000u) / 4095u
-        // dl2_.setDelayMs(newDelayMs2);
+        uint16_t newDelayMs1 = (KnobVal(Knob::X) * 1000u) / 4095u;
+        dl1_.setDelayMs(newDelayMs1);
+        uint16_t newDelayMs2 = (KnobVal(Knob::Y) * 1000u) / 4095u;
+        dl2_.setDelayMs(newDelayMs2);
 
         // B) Per-sample LFO in samples with 16.16 precision (still smoothed)
         // uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
@@ -269,10 +268,13 @@ public:
         int16_t out = (int16_t)(((int32_t)out1 + (int32_t)out2) >> 1);
 
         // Limit
-        //uint16_t thrQ15 = (KnobVal(Knob::Main) * 32767u) / 4095u;
-        //lim_.setThresholdQ15(thrQ15);
+        uint16_t thrQ15 = (KnobVal(Knob::Main) * 32767u) / 4095u;
+        lim_.setThresholdQ15(thrQ15);
         int16_t outlim = lim_.process(out);
+
+        // Output
         AudioOut1(outlim);
+        LedBrightness(0, outlim+2047);
     }
 
 private:
