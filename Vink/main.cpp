@@ -5,7 +5,7 @@
 #include <algorithm>
 
 /* Vink
-	Dual delay loops + ring mod with a limiter for Jaap Vink / Roland Kayn style feedback patching 
+	Dual delay loops + tape saturation with a limiter for Jaap Vink / Roland Kayn style feedback patching 
 	For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
 
 	Blocks:
