@@ -32,6 +32,22 @@
 // ---------- helpers ----------
 static inline int16_t sat16(int32_t x){ if(x>32767) return 32767; if(x<-32768) return -32768; return (int16_t)x; }
 static inline int16_t sat12(int32_t x){ if(x>2047) return 2047; if(x<-2048) return -2048; return (int16_t)x; }
+static inline int16_t audio12_to_q15(int16_t x){ return (int16_t)(((int32_t)x) << 4); }
+static inline int16_t q15_to_audio12(int32_t x){
+    int32_t rounded;
+    if (x >= 0) {
+        rounded = (x + 8) >> 4;
+    } else {
+        rounded = -(((-x) + 8) >> 4);
+    }
+    return sat12(rounded);
+}
+static inline uint16_t led_from_audio12(int16_t x){
+    int32_t v = (int32_t)x + 2048;
+    if(v < 0) v = 0;
+    if(v > 4095) v = 4095;
+    return (uint16_t)v;
+}
 static inline int16_t mul_q15(int16_t a, int16_t b){ return (int16_t)(((int32_t)a * (int32_t)b) >> 15); }
 
 // One-pole (state-space) lowpass: y += a*(x - y), a in Q15
@@ -258,7 +274,7 @@ public:
         // y = (x0*(1-f) + x1*f), f in [0..1) as 16-bit fraction
         uint32_t f = delayFrac;
         int32_t y  = ( (x0 * (int32_t)(65536u - f)) + (x1 * (int32_t)f) ) >> 16;
-        int16_t out = sat12(y);
+        int16_t out = sat16(y);
 
         // 4) Write current input and advance
         buffer_[w_] = in;
@@ -300,13 +316,11 @@ public:
     void ProcessSample() override
     {
         // 2 delay lines
-        int16_t in1 = AudioIn1();
-        int16_t in2 = AudioIn2();
-        int16_t in = 0;
+        int16_t in1 = audio12_to_q15(AudioIn1());
+        int16_t in2 = audio12_to_q15(AudioIn2());
+        int16_t in = in1;
         if (Connected(Input::Audio2)) {
             in = (int16_t)(((int32_t)in1 + (int32_t)in2) >> 1);
-        } else{
-            in = in1;
         }
 
         int16_t delay1 = dl1_.process(in);  // delayed only (you mix elsewhere)
@@ -347,10 +361,11 @@ public:
             int16_t outlim = lim_.process(out);
 
             // Output
-            AudioOut1(outlim);
-            AudioOut2(outlim);
-            LedBrightness(0, outlim+2047);
-            LedBrightness(1, outlim+2047);
+            int16_t out12 = q15_to_audio12(outlim);
+            AudioOut1(out12);
+            AudioOut2(out12);
+            LedBrightness(0, led_from_audio12(out12));
+            LedBrightness(1, led_from_audio12(out12));
         } else {
 
             // Limit
@@ -360,10 +375,12 @@ public:
             int16_t outlim2 = lim_.process(delay2);
 
             // Output
-            AudioOut1(outlim1);
-            AudioOut2(outlim2);
-            LedBrightness(0, outlim1+2047);
-            LedBrightness(1, outlim2+2047);
+            int16_t out12_1 = q15_to_audio12(outlim1);
+            int16_t out12_2 = q15_to_audio12(outlim2);
+            AudioOut1(out12_1);
+            AudioOut2(out12_2);
+            LedBrightness(0, led_from_audio12(out12_1));
+            LedBrightness(1, led_from_audio12(out12_2));
         }
     }
 
