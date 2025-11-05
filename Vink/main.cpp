@@ -43,10 +43,10 @@ static inline int16_t q15_to_audio12(int32_t x){
     return sat12(rounded);
 }
 static inline uint16_t led_from_audio12(int16_t x){
-    int32_t v = (int32_t)x + 2048;
+    int16_t v = x + 2048;
     if(v < 0) v = 0;
     if(v > 4095) v = 4095;
-    return (uint16_t)v;
+    return v;
 }
 static inline int16_t mul_q15(int16_t a, int16_t b){ return (int16_t)(((int32_t)a * (int32_t)b) >> 15); }
 
@@ -79,7 +79,7 @@ struct TapeSaturator {
     // Controls (Q15): 32767 ≈ 1.0
     uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
     uint16_t makeupQ15  = 16384;  // bring level back after clipping
-    int16_t  biasQ15    = 128;      // small DC bias for asymmetry (e.g., ±1024)
+    int16_t  biasQ15    = 1024;      // small DC bias for asymmetry (e.g., ±1024)
 
     // Pre/post filters
     OnePoleHP preHP;    // pre-emphasis (boost highs into nonlinearity)
@@ -117,8 +117,6 @@ struct TapeSaturator {
 
 static inline int16_t RingMod(int16_t a, int16_t b)
 {
-    // Multiply 16-bit signed values and scale back to 16-bit range.
-    // Using 32-bit intermediate avoids overflow.
     int32_t prod = (int32_t)a * (int32_t)b;   // range: ±(32768²)
     prod >>= 15;                              // Q15 scaling back to ±32767
     if (prod >  32767) prod =  32767;
@@ -321,11 +319,11 @@ public:
     void ProcessSample() override
     {
         // 2 delay lines
-        int16_t in1 = audio12_to_q15(AudioIn1());
-        int16_t in2 = audio12_to_q15(AudioIn2());
+        int16_t in1 = AudioIn1();
+        int16_t in2 = AudioIn2();
         int16_t in = in1;
         if (Connected(Input::Audio2)) {
-            in = (int16_t)(((int32_t)in1 + (int32_t)in2) >> 1);
+            in = (int16_t)((in1 + in2) >> 1);
         }
 
         int16_t delay1 = dl1_.process(in);  // delayed only (you mix elsewhere)
@@ -357,37 +355,32 @@ public:
         // }
 
         // Mix delays and output
-        if (SwitchVal() == Switch::Middle){
-            int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
-
+        int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
+        if (SwitchVal() == Switch::Up){
             // Limit (after tape saturation)
-            uint16_t thrQ15 = (KnobVal(Knob::Y) * 32767u) / 4095u;
+            uint16_t thrQ15 = (KnobVal(Knob::Y) * 4095u) / 4095u; //32767u
             lim_.setThresholdQ15(thrQ15);
             int16_t outsat = sat.process(out);
-            int16_t outlim = lim_.process(outsat);
-
+            int16_t outl = sat12(lim_.process(outsat));
             // Output
-            int16_t out12 = q15_to_audio12(outlim);
-            AudioOut1(out12);
-            AudioOut2(out12);
-            LedBrightness(0, led_from_audio12(out12));
-            LedBrightness(1, led_from_audio12(out12));
-        } else {
-
-            // Limit
-            uint16_t thrQ15 = (KnobVal(Knob::Y) * 32767u) / 4095u;
-            lim_.setThresholdQ15(thrQ15);
-            int16_t outlim1 = lim_.process(delay1);
-            int16_t outlim2 = lim_.process(delay2);
-
-            // Output
-            int16_t out12_1 = q15_to_audio12(outlim1);
-            int16_t out12_2 = q15_to_audio12(outlim2);
-            AudioOut1(out12_1);
-            AudioOut2(out12_2);
-            LedBrightness(0, led_from_audio12(out12_1));
-            LedBrightness(1, led_from_audio12(out12_2));
+            AudioOut1(outl);
+            AudioOut2(outl);
+            LedBrightness(0, led_from_audio12(outl));
+            LedBrightness(1, led_from_audio12(outl));
         }
+        else {
+            // Limit (no tape saturation)
+            uint16_t thrQ15 = (KnobVal(Knob::Y) * 4095u) / 4095u;
+            lim_.setThresholdQ15(thrQ15);
+            // int16_t outsat = sat.process(out);
+            int16_t outl = sat12(lim_.process(out));
+            // Output
+            AudioOut1(outl);
+            AudioOut2(outl);
+            LedBrightness(0, led_from_audio12(outl));
+            LedBrightness(1, led_from_audio12(outl));
+        }
+
     }
 
 private:
