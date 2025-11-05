@@ -311,6 +311,11 @@ public:
         dl1_.setSlewPerSecondMs(200.0f);
         dl2_.setDelayMs(50);
         dl2_.setSlewPerSecondMs(200.0f);
+        sat.preHP.lp.a = 3000;    // pre-emphasis strength
+        sat.postLP.a   = 2000;    // de-emphasis/AA smoothing
+        sat.driveQ15   = 24576;   // ~0.75
+        sat.makeupQ15  = 24576;   // ~0.75
+        sat.biasQ15    = 512;     // slight asymmetry
     }
 
     void ProcessSample() override
@@ -358,10 +363,12 @@ public:
             // Limit
             uint16_t thrQ15 = (KnobVal(Knob::Y) * 32767u) / 4095u;
             lim_.setThresholdQ15(thrQ15);
-            int16_t outlim = lim_.process(out);
+            // int16_t outlim = lim_.process(out);
+            int16_t outsat = sat.process(in);
+
 
             // Output
-            int16_t out12 = q15_to_audio12(outlim);
+            int16_t out12 = q15_to_audio12(outsat);
             AudioOut1(out12);
             AudioOut2(out12);
             LedBrightness(0, led_from_audio12(out12));
@@ -388,6 +395,7 @@ private:
     SmoothDelay dl1_;
     SmoothDelay dl2_;
     FixedRatioLimiter lim_;
+    TapeSaturator sat;
 };
 
 
