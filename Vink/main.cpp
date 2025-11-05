@@ -360,15 +360,14 @@ public:
         if (SwitchVal() == Switch::Middle){
             int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
 
-            // Limit
+            // Limit (after tape saturation)
             uint16_t thrQ15 = (KnobVal(Knob::Y) * 32767u) / 4095u;
             lim_.setThresholdQ15(thrQ15);
-            // int16_t outlim = lim_.process(out);
-            int16_t outsat = sat.process(in);
-
+            int16_t outsat = sat.process(out);
+            int16_t outlim = lim_.process(outsat);
 
             // Output
-            int16_t out12 = q15_to_audio12(outsat);
+            int16_t out12 = q15_to_audio12(outlim);
             AudioOut1(out12);
             AudioOut2(out12);
             LedBrightness(0, led_from_audio12(out12));
