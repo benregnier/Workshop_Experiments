@@ -79,7 +79,7 @@ struct TapeSaturator {
     // Controls (Q15): 32767 ≈ 1.0
     uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
     uint16_t makeupQ15  = 16384;  // bring level back after clipping
-    int16_t  biasQ15    = 0;      // small DC bias for asymmetry (e.g., ±1024)
+    int16_t  biasQ15    = 128;      // small DC bias for asymmetry (e.g., ±1024)
 
     // Pre/post filters
     OnePoleHP preHP;    // pre-emphasis (boost highs into nonlinearity)
