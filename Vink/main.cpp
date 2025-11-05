@@ -78,8 +78,8 @@ struct OnePoleHP {
 struct TapeSaturator {
     // Controls (Q15): 32767 ≈ 1.0
     uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
-    uint16_t makeupQ15  = 16384;  // bring level back after clipping (auto-set via setDriveWithComp)
-    int16_t  biasQ15    = 0;      // small DC bias for asymmetry (e.g., ±1024)
+    uint16_t makeupQ15  = 16384;  // bring level back after clipping
+    int16_t  biasQ15    = 128;      // small DC bias for asymmetry (e.g., ±1024)
 
     // Pre/post filters
     OnePoleHP preHP;    // pre-emphasis (boost highs into nonlinearity)
@@ -112,17 +112,6 @@ struct TapeSaturator {
     }
 
     void clear(){ preHP.clear(); postLP.clear(); }
-
-    // Helper: set drive and compute makeup that keeps small-signal gain ≈ 1.0
-    void setDriveWithComp(uint16_t newDriveQ15){
-        if (newDriveQ15 < 1024) newDriveQ15 = 1024; // avoid zero / huge makeup
-        driveQ15 = newDriveQ15;
-        // Makeup ≈ 1/drive (Q15 domain). Use 64-bit to preserve precision.
-        uint64_t numerator = (uint64_t)1 << 30; // 32768 * 32768
-        uint64_t makeup = numerator / driveQ15;
-        if (makeup > 65535u) makeup = 65535u;   // sanity clamp (~2.0x)
-        makeupQ15 = (uint16_t)makeup;
-    }
 };
 
 
@@ -324,7 +313,8 @@ public:
         dl2_.setSlewPerSecondMs(200.0f);
         sat.preHP.lp.a = 3000;    // pre-emphasis strength
         sat.postLP.a   = 2000;    // de-emphasis/AA smoothing
-        sat.setDriveWithComp(24576); // ~0.75 drive with auto makeup (~1/drive)
+        sat.driveQ15   = 24576;   // ~0.75
+        sat.makeupQ15  = 24576;   // ~0.75
         sat.biasQ15    = 512;     // slight asymmetry
     }
 
