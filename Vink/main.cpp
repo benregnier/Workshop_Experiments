@@ -285,6 +285,9 @@ public:
 
     void clear(){ std::memset(buffer_, 0, bufSize_*sizeof(int16_t)); }
 
+    // Expose the current delay setting (16.16 samples)
+    uint32_t currentDelaySamplesFP16() const { return current_fp16_; }
+
 private:
     uint32_t sr_;
     uint32_t bufSize_{0}, mask_{0};
@@ -316,6 +319,17 @@ public:
         sat.driveQ15   = 24576;   // ~0.75
         sat.makeupQ15  = 24576;   // ~0.75
         sat.biasQ15    = 512;     // slight asymmetry
+
+        PulseOut1(false);
+        PulseOut2(false);
+
+        uint32_t initDelay1Samples = std::max<uint32_t>(1u, (dl1_.currentDelaySamplesFP16() + 0x8000u) >> 16);
+        pulseInterval1_ = std::max<uint32_t>(1u, initDelay1Samples / 2u);
+        pulseCountdown1_ = pulseInterval1_;
+
+        uint32_t initDelay2Samples = std::max<uint32_t>(1u, (dl2_.currentDelaySamplesFP16() + 0x8000u) >> 16);
+        pulseInterval2_ = std::max<uint32_t>(1u, initDelay2Samples / 2u);
+        pulseCountdown2_ = pulseInterval2_;
     }
 
     void ProcessSample() override
@@ -343,6 +357,45 @@ public:
         if (newDelayMs2 < 1) fSpread = 0;
         if (newDelayMs2 > 4095) newDelayMs1 = 4095;
         dl2_.setDelayMs(newDelayMs2);
+
+        // Update pulse outputs so they track the audible delay times
+        {
+            uint32_t delaySamples1 = std::max<uint32_t>(1u, (dl1_.currentDelaySamplesFP16() + 0x8000u) >> 16);
+            uint32_t desiredInterval1 = delaySamples1 / 2u;
+            if (desiredInterval1 == 0) desiredInterval1 = 1u;
+            if (pulseInterval1_ != desiredInterval1) {
+                pulseInterval1_ = desiredInterval1;
+                if (pulseCountdown1_ > pulseInterval1_) {
+                    pulseCountdown1_ = pulseInterval1_;
+                }
+            }
+            if (pulseCountdown1_ <= 1u) {
+                pulseState1_ = !pulseState1_;
+                PulseOut1(pulseState1_);
+                pulseCountdown1_ = pulseInterval1_;
+            } else {
+                pulseCountdown1_--;
+            }
+        }
+
+        {
+            uint32_t delaySamples2 = std::max<uint32_t>(1u, (dl2_.currentDelaySamplesFP16() + 0x8000u) >> 16);
+            uint32_t desiredInterval2 = delaySamples2 / 2u;
+            if (desiredInterval2 == 0) desiredInterval2 = 1u;
+            if (pulseInterval2_ != desiredInterval2) {
+                pulseInterval2_ = desiredInterval2;
+                if (pulseCountdown2_ > pulseInterval2_) {
+                    pulseCountdown2_ = pulseInterval2_;
+                }
+            }
+            if (pulseCountdown2_ <= 1u) {
+                pulseState2_ = !pulseState2_;
+                PulseOut2(pulseState2_);
+                pulseCountdown2_ = pulseInterval2_;
+            } else {
+                pulseCountdown2_--;
+            }
+        }
 
         // B) Per-sample LFO in samples with 16.16 precision (still smoothed)
         // uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
@@ -390,6 +443,12 @@ private:
     SmoothDelay dl2_;
     FixedRatioLimiter lim_;
     TapeSaturator sat;
+    uint32_t pulseInterval1_{1};
+    uint32_t pulseInterval2_{1};
+    uint32_t pulseCountdown1_{1};
+    uint32_t pulseCountdown2_{1};
+    bool pulseState1_{false};
+    bool pulseState2_{false};
 };
 
 
