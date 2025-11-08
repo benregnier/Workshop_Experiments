@@ -129,8 +129,8 @@ struct ESPState {
   int16_t env = 0;
   uint8_t env_attack_idx = 20; // faster
   uint8_t env_release_idx = 6; // slower
-  uint16_t trig_on_Q15  = 2000;  // ~9% FS
-  uint16_t trig_off_Q15 = 1600;  // ~4.6% FS
+  uint16_t trig_on_Q15  = 2000;  // this sets the gate threshold
+  uint16_t trig_off_Q15 = 1600;  // this sets the gate threshold hysteresis, prevents flickering
   bool gate = false;
 
   // Pitch (zero-crossing with hysteresis)
@@ -309,10 +309,6 @@ public:
     LedBrightness(2, esp.pitch_led);
 
     // Envelope Out
-    //uint16_t envQ15 = (uint16_t)esp.env_out;
-    //int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
-    //(void)CVOutMillivolts(1, env_mv);
-    //uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
     if (esp.env_out > 2047) esp.env_out = 2047;
     if (esp.env_out < 0 ) esp.env_out = 0;
     CVOut2(esp.env_out);
