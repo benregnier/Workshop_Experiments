@@ -142,10 +142,11 @@ struct ESPState {
 
   // Outputs
   int16_t env_out = 0;           // Q15 envelope
-  int16_t trig_out = 0;          // 0 or 32767
+  int16_t trig_out = 0;          // 0 or 32767 (unused, retained for reference)
   uint32_t pitch_hzQ16_16 = 0;   // Hz in Q16.16 (updated on new ZC)
   int32_t pitch_mv = 0;          // cached millivolts for CVOut1
   uint16_t pitch_led = 0;        // brightness for LED 2
+  uint16_t trig_countdown = 0;   // remaining samples for trigger pulse
 };
 
 // ================= ESP processing =================
@@ -157,6 +158,7 @@ public:
   uint32_t control_counter = 0;
 
   static constexpr uint32_t kControlIntervalSamples = 240; // ~200 Hz
+  static constexpr uint16_t kTriggerPulseSamples = 96;      // 2 ms @ 48 kHz
 
   ESPCard() {
     OneVOct_Init(onev);
@@ -281,9 +283,17 @@ public:
     esp.env_out = esp.env;
 
     // Gate (Schmitt) from envelope
+    bool prev_gate = esp.gate;
     if (!esp.gate && (uint16_t)esp.env_out > esp.trig_on_Q15) esp.gate = true;
     else if (esp.gate && (uint16_t)esp.env_out <= esp.trig_off_Q15) esp.gate = false;
-    // esp.trig_out = esp.gate ? 32767 : 0;
+    if (!prev_gate && esp.gate) {
+      esp.trig_countdown = kTriggerPulseSamples;
+    }
+    bool trig_active = esp.trig_countdown > 0;
+    if (trig_active) {
+      esp.trig_countdown--;
+    }
+    PulseOut2(trig_active);
     PulseOut1(esp.gate);
     LedOn(4, esp.gate);
 
