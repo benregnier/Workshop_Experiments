@@ -11,10 +11,11 @@ Further discussion in the Discord - invite in the documentation below.
 ### CombFilter  
 A proof of concept for audio stuff with a single delay line that provides comb filtering and karplus-strong funtimes
 
-### ESP  
-A MS-20-style External Signal Processor that includes a preamp, bandpass filter, envelope follower, gate, and 1v/oct pitch outs
-Build at [ESP/build](./ESP/build)  
-Documentation at [ESP/docs](./ESP/docs)
+### ESP
+A MS-20-style External Signal Processor that includes a preamp, bandpass filter, envelope follower, gate, and 1v/oct pitch outs. 
+<img src="./ESP/docs/ms20_patchbay.jpg" alt="MS-20 Patchbay" width="400"/>  
+UF2 build at [ESP/build](./ESP/build)  
+PDF Documentation at [ESP/docs/ESP_Card_Doc](./ESP/docs/ESP_Card_Doc.pdf)  
 
 ### Vink  
 Dual delay loops + tape saturation with a limiter for Jaap Vink / Roland Kayn style feedback patching 
