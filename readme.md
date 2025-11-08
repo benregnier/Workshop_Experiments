@@ -13,8 +13,10 @@ A proof of concept for audio stuff with a single delay line that provides comb f
 
 ### ESP  
 A MS-20-style External Signal Processor that includes a preamp, bandpass filter, envelope follower, gate, and 1v/oct pitch outs
+Build at [ESP/build](./ESP/build)  
+Documentation at [ESP/docs](./ESP/docs)
 
-### Vink
+### Vink  
 Dual delay loops + tape saturation with a limiter for Jaap Vink / Roland Kayn style feedback patching 
 For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
 
