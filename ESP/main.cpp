@@ -22,11 +22,13 @@
     Switch: When set to middle, pitch updates only when gate is high, otherwise continuous
 
   Input and Output Mapping:
-    AudioIn1: Audio In
-    AudioOut1: Bandpassed audio
+    AudioIn1 : Audio In
+    AudioOut1 : Post-Gain Audio
+    AudioOut2 : Bandpassed audio
     CVOut1 : 1 V/oct pitch
-    CVOut2 : envelope
-    Pulse1 : gate
+    CVOut2 : Envelope
+    Pulse1 : Gate
+    Pulse2 : Trigger
   
 */
 
@@ -211,6 +213,7 @@ public:
     return one_pole_lerp(x_abs, env, a);
   }
 
+
   inline uint32_t PitchZC(int16_t bp) {
     // hysteresis polarity tracking
     if (bp > esp.zc_pos_thresh) esp.zc_was_pos = true;
@@ -309,7 +312,8 @@ public:
     // Monitor: send band-passed audio out (or choose pre/in)
     if (bp > 2047) bp = 2047;
     else if (bp < -2048) bp = -2048;
-    AudioOut1(bp);
+    AudioOut1(pre);
+    AudioOut2(bp);
     LedBrightness(0, abs16(bp)*2);
   }
 };
