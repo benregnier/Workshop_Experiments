@@ -313,7 +313,7 @@ public:
     //int32_t env_mv = ((int32_t)envQ15 * CV_FULL_SCALE_MV) >> 15;
     //(void)CVOutMillivolts(1, env_mv);
     //uint16_t env_led = (uint16_t)(((uint32_t)env_mv * 4095) / CV_FULL_SCALE_MV);
-    if (esp.env_out > 2047) esp.env_out = 2047;
+    if (esp.env_out > 2500) esp.env_out = 2500;
     if (esp.env_out < 0 ) esp.env_out = 0;
     CVOut2(esp.env_out);
     int16_t env_led = esp.env_out * 2;

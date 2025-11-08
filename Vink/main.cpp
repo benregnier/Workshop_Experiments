@@ -88,7 +88,8 @@ struct TapeSaturator {
     // Process one sample (Q15 int16)
     inline int16_t process(int16_t x){
         // 1) pre-emphasis (subtle)
-        int16_t pre = preHP.process(x);
+        int16_t pre = x;
+        //int16_t pre = preHP.process(x);
 
         // 2) add small bias for asymmetry
         int32_t z = (int32_t)pre + (int32_t)biasQ15;
@@ -107,7 +108,8 @@ struct TapeSaturator {
         y = ((y * (int32_t)makeupQ15) >> 15);
 
         // 6) post lowpass to smooth HF crud
-        int16_t out = postLP.process(sat16(y));
+        //int16_t out = postLP.process(sat16(y));
+        int16_t out = sat16(y);
         return out;
     }
 
