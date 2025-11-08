@@ -16,13 +16,13 @@
 
   Control mapping (adjust in UpdateControls()):
     Knob1: Preamp gain (0.5x .. 32x, exponential)
-    Knob2: HP cutoff (~20 Hz .. ~5 kHz)
-    Knob3: LP cutoff (~20 Hz .. ~5 kHz pegged to hp cutoff)
+    Knob2: Bandpass filter lower cutoff (~20 Hz .. ~5 kHz)
+    Knob3: Bandpass filter upper cutoff (~20 Hz .. ~5 kHz pegged to lower cutoff)
 
     Switch: When set to middle, pitch updates only when gate is high, otherwise continuous
 
   Input and Output Mapping:
-    AudioIn2: Audio In
+    AudioIn1: Audio In
     AudioOut1: Bandpassed audio
     CVOut1 : 1 V/oct pitch
     CVOut2 : envelope
