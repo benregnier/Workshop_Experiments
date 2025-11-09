@@ -206,7 +206,15 @@ class SmoothDelay {
 public:
     // maxDelayMs: upper bound (e.g., 1000 = 1s)
     explicit SmoothDelay(uint32_t sampleRate, uint32_t maxDelayMs)
-    : sr_(sampleRate)
+    : sr_(sampleRate),
+      bufSize_(0),
+      mask_(0),
+      buffer_(nullptr),
+      w_(0),
+      current_fp16_(0),
+      target_fp16_(0),
+      slew_step_fp16_(0),
+      initialised_(false)
     {
         uint32_t maxSamples = (uint64_t)sampleRate * maxDelayMs / 1000u + 2u; // +2 for interp
         bufSize_ = 1u; while (bufSize_ < maxSamples) bufSize_ <<= 1;
@@ -233,6 +241,10 @@ public:
         uint64_t max_fp16 = ((uint64_t)(bufSize_-2) << 16);
         if (delay_fp16 > max_fp16) delay_fp16 = max_fp16;
         target_fp16_ = (uint32_t)delay_fp16;
+        if (!initialised_) {
+            current_fp16_ = target_fp16_;
+            initialised_ = true;
+        }
     }
 
     // Optional: control slew (how fast we allow delay to change)
@@ -290,16 +302,18 @@ public:
 
 private:
     uint32_t sr_;
-    uint32_t bufSize_{0}, mask_{0};
-    int16_t* buffer_{nullptr};
-    uint32_t w_{0};
+    uint32_t bufSize_;
+    uint32_t mask_;
+    int16_t* buffer_;
+    uint32_t w_;
 
     // Delay (16.16 samples)
-    uint32_t current_fp16_{0};
-    uint32_t target_fp16_{0};
+    uint32_t current_fp16_;
+    uint32_t target_fp16_;
 
     // Slew step per sample in 16.16 samples
-    uint32_t slew_step_fp16_{0};
+    uint32_t slew_step_fp16_;
+    bool initialised_;
 };
 
 class Vink : public ComputerCard
