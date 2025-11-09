@@ -318,6 +318,7 @@ private:
 
 class Vink : public ComputerCard
 {
+    static constexpr uint32_t kSampleRate = 48000u;
     static constexpr uint32_t kMaxDelayMs = 250u;
     static constexpr uint32_t kMaxDelaySamples = (kSampleRate * kMaxDelayMs) / 1000u;
     static constexpr uint32_t kMaxDelaySamplesFP16 = kMaxDelaySamples << 16;
