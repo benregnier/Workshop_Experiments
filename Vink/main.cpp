@@ -347,16 +347,28 @@ public:
 
         // Modulate without clicks (two common options):
         // A) Block-by-block sweep (slew handles smoothing)
-        uint16_t fCenter = (KnobVal(Knob::Main) * 250u) / 4095u;
-        uint16_t fSpread = (KnobVal(Knob::X) * 250u) / 4095u;
-        uint16_t newDelayMs1 = fCenter + (fSpread / 2);
-        if (newDelayMs1 < 1) fSpread = 0;
-        if (newDelayMs1 > 4095) newDelayMs1 = 4095;
-        dl1_.setDelayMs(newDelayMs1);
-        uint16_t newDelayMs2 = fCenter - (fSpread / 2);
-        if (newDelayMs2 < 1) fSpread = 0;
-        if (newDelayMs2 > 4095) newDelayMs1 = 4095;
-        dl2_.setDelayMs(newDelayMs2);
+        // Knob values map directly to 16.16 sample counts so the control operates in samples.
+        uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
+        uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
+        uint32_t half_spread_fp16 = spread_fp16 >> 1;
+
+        uint32_t delay1_fp16 = center_fp16 + half_spread_fp16;
+        if (delay1_fp16 > kMaxDelaySamplesFP16) {
+            delay1_fp16 = kMaxDelaySamplesFP16;
+        }
+        if (delay1_fp16 < kMinDelaySamplesFP16) {
+            delay1_fp16 = kMinDelaySamplesFP16;
+        }
+        dl1_.setDelaySamplesFP16(delay1_fp16);
+
+        uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
+        if (delay2_fp16 > kMaxDelaySamplesFP16) {
+            delay2_fp16 = kMaxDelaySamplesFP16;
+        }
+        if (delay2_fp16 < kMinDelaySamplesFP16) {
+            delay2_fp16 = kMinDelaySamplesFP16;
+        }
+        dl2_.setDelaySamplesFP16(delay2_fp16);
 
         // Update pulse outputs so they track the audible delay times
         {
@@ -413,7 +425,7 @@ public:
         int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
         if (SwitchVal() == Switch::Up){
             // Limit (after tape saturation)
-            uint16_t thrQ15 = (KnobVal(Knob::Y) * 4095u) / 4095u; //32767u
+            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 32767u) / 4095u);
             lim_.setThresholdQ15(thrQ15);
             int16_t outsat = sat.process(out);
             int16_t outl = sat12(lim_.process(outsat));
@@ -425,7 +437,7 @@ public:
         }
         else {
             // Limit (no tape saturation)
-            uint16_t thrQ15 = (KnobVal(Knob::Y) * 4095u) / 4095u;
+            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 32767u) / 4095u);
             lim_.setThresholdQ15(thrQ15);
             // int16_t outsat = sat.process(out);
             int16_t outl = sat12(lim_.process(out));
