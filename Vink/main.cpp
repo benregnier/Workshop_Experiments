@@ -374,6 +374,7 @@ public:
         // Knob values map directly to 16.16 sample counts so the control operates in samples.
         uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
         uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
+        //uint32_t mult_fp16 = (KnobVal(Knob::X) * 16u) / 4095u; // 0..128 in Q7
         // uint32_t half_spread_fp16 = spread_fp16 >> 1;
 
         uint32_t delay1_fp16 = center_fp16;
@@ -387,6 +388,7 @@ public:
 
         // uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
         uint32_t delay2_fp16 = center_fp16 + spread_fp16;
+        // uint32_t delay2_fp16 = center_fp16 * mult_fp16;
         if (delay2_fp16 > kMaxDelaySamplesFP16) {
             delay2_fp16 = kMaxDelaySamplesFP16;
         }
