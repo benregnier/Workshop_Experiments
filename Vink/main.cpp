@@ -374,9 +374,9 @@ public:
         // Knob values map directly to 16.16 sample counts so the control operates in samples.
         uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
         uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
-        uint32_t half_spread_fp16 = spread_fp16 >> 1;
+        // uint32_t half_spread_fp16 = spread_fp16 >> 1;
 
-        uint32_t delay1_fp16 = center_fp16 + half_spread_fp16;
+        uint32_t delay1_fp16 = center_fp16;
         if (delay1_fp16 > kMaxDelaySamplesFP16) {
             delay1_fp16 = kMaxDelaySamplesFP16;
         }
@@ -385,7 +385,8 @@ public:
         }
         dl1_.setDelaySamplesFP16(delay1_fp16);
 
-        uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
+        // uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
+        uint32_t delay2_fp16 = center_fp16 + spread_fp16;
         if (delay2_fp16 > kMaxDelaySamplesFP16) {
             delay2_fp16 = kMaxDelaySamplesFP16;
         }
@@ -408,6 +409,7 @@ public:
             if (pulseCountdown1_ <= 1u) {
                 pulseState1_ = !pulseState1_;
                 PulseOut1(pulseState1_);
+                LedOn(4, pulseState1_); // debug
                 pulseCountdown1_ = pulseInterval1_;
             } else {
                 pulseCountdown1_--;
@@ -427,6 +429,7 @@ public:
             if (pulseCountdown2_ <= 1u) {
                 pulseState2_ = !pulseState2_;
                 PulseOut2(pulseState2_);
+                LedOn(5, pulseState2_); // debug
                 pulseCountdown2_ = pulseInterval2_;
             } else {
                 pulseCountdown2_--;
