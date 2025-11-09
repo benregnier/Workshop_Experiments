@@ -40,7 +40,7 @@ macro (add_example _name)
   endif()
 endmacro()
   
-#add_example(TestProject)
+add_example(TestProject)
 
 add_example(PianoPiano)
 
