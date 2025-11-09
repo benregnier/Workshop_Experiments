@@ -304,15 +304,25 @@ private:
 
 class Vink : public ComputerCard
 {
+    static constexpr uint32_t kSampleRate = 48000u;
+    static constexpr uint32_t kMaxDelayMs = 250u;
+    static constexpr uint32_t kMaxDelaySamples = (kSampleRate * kMaxDelayMs) / 1000u;
+    static constexpr uint32_t kMaxDelaySamplesFP16 = kMaxDelaySamples << 16;
+    static constexpr uint32_t kMinDelaySamplesFP16 = 1u << 16; // ensure at least one sample of delay
+
+    static constexpr uint32_t msToFP16(uint32_t ms){
+        return (uint32_t)(((uint64_t)kSampleRate * ms << 16) / 1000u);
+    }
+
 public:
     Vink()
-        : dl1_(48000, 250),
-          dl2_(48000, 250),
-          lim_(48000, 1.0f, 100.0f, 29491, 1000)
+        : dl1_(kSampleRate, kMaxDelayMs),
+          dl2_(kSampleRate, kMaxDelayMs),
+          lim_(kSampleRate, 1.0f, 100.0f, 29491, 1000)
     {
-        dl1_.setDelayMs(100);
+        dl1_.setDelaySamplesFP16(msToFP16(100));
         dl1_.setSlewPerSecondMs(200.0f);
-        dl2_.setDelayMs(50);
+        dl2_.setDelaySamplesFP16(msToFP16(50));
         dl2_.setSlewPerSecondMs(200.0f);
         sat.preHP.lp.a = 3000;    // pre-emphasis strength
         sat.postLP.a   = 2000;    // de-emphasis/AA smoothing
@@ -347,16 +357,27 @@ public:
 
         // Modulate without clicks (two common options):
         // A) Block-by-block sweep (slew handles smoothing)
-        uint16_t fCenter = (KnobVal(Knob::Main) * 250u) / 4095u;
-        uint16_t fSpread = (KnobVal(Knob::X) * 250u) / 4095u;
-        uint16_t newDelayMs1 = fCenter + (fSpread / 2);
-        if (newDelayMs1 < 1) fSpread = 0;
-        if (newDelayMs1 > 4095) newDelayMs1 = 4095;
-        dl1_.setDelayMs(newDelayMs1);
-        uint16_t newDelayMs2 = fCenter - (fSpread / 2);
-        if (newDelayMs2 < 1) fSpread = 0;
-        if (newDelayMs2 > 4095) newDelayMs1 = 4095;
-        dl2_.setDelayMs(newDelayMs2);
+        uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
+        uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
+        uint32_t half_spread_fp16 = spread_fp16 >> 1;
+
+        uint32_t delay1_fp16 = center_fp16 + half_spread_fp16;
+        if (delay1_fp16 > kMaxDelaySamplesFP16) {
+            delay1_fp16 = kMaxDelaySamplesFP16;
+        }
+        if (delay1_fp16 < kMinDelaySamplesFP16) {
+            delay1_fp16 = kMinDelaySamplesFP16;
+        }
+        dl1_.setDelaySamplesFP16(delay1_fp16);
+
+        uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
+        if (delay2_fp16 > kMaxDelaySamplesFP16) {
+            delay2_fp16 = kMaxDelaySamplesFP16;
+        }
+        if (delay2_fp16 < kMinDelaySamplesFP16) {
+            delay2_fp16 = kMinDelaySamplesFP16;
+        }
+        dl2_.setDelaySamplesFP16(delay2_fp16);
 
         // Update pulse outputs so they track the audible delay times
         {
