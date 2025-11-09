@@ -9,24 +9,28 @@
 	For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
 
 	Blocks:
-		- Two delay taps (x to y ms)
-		- Ring modulators for each loop sharing a single input
+		- Two delay taps (approx 250ms max, down to 3 samples)
+        - Tape-style soft clipper on combined delay output (switchable bypass)
 		- Compressor/limiter end of chain
 
 	Control Mapping:
-                Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
-                Knob::X: delay timing spread (averaged with CVIn2 when patched)
+        Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
+        Knob::X: delay timing spread (averaged with CVIn2 when patched)
 		Knob::Y: limiter volume
+        Switch: Up = tape saturation + limiter; Center/Mom = limiter only
 
+    Inputs/Outputs:
 		AudioIn1: Audio In
-		AudioIn2: Ring Modulator In (disconnects when not patched)
-		(Future) CVIn1: Main Knob control
-		(Future) CVIn2: Knob X control
-		(Future) Switch: Select split (Up) or shared (mom/down) output
+		AudioIn2: Audio In (averaged with AudioIn1 if patched)
+		CVIn1: Tap 1 control (when patched averaged with Knob Main)
+		CVIn2: Tap 2 control (when patched averaged with Knob X)
+
 		AudioOut1: Tap 1 or shared
-		(Future) AudioOut2: Tap 2 if split
-		(Optional) CVOut1 envelope follower signal from limiter?
-		
+		AudioOut2: Tap 2 if split
+		CVOut1: Superslow chaotic LFO 1
+        CVOut2: Superslow chaotic LFO 2
+        PulseOut1: pulse tracking delay 1 time
+        PulseOut2: pulse tracking delay 2 time
 */
 
 // ---------- helpers ----------
@@ -584,6 +588,8 @@ public:
         if (cvOut2 < -2048) cvOut2 = -2048;
         if (cvOut2 > 2047) cvOut2 = 2047;
         CVOut1((int16_t)cvOut1);
+        LedBrightness(2, (uint16_t)(cvOut1 + 2048)); // debug
+        LedBrightness(3, (uint16_t)(cvOut2 + 2048)); // debug
         CVOut2((int16_t)cvOut2);
 
     }
