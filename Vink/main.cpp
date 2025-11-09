@@ -418,23 +418,12 @@ public:
             }
         }
 
-        // B) Per-sample LFO in samples with 16.16 precision (still smoothed)
-        // uint32_t lfo_fp16 = /* your computed (samples<<16)+frac */;
-        // dl.setDelaySamplesFP16(lfo_fp16);
-
-        // Ring Modulation
-        // int16_t out1 = delay1;
-        // int16_t out2 = delay2;
-        // if (Connected(Input::Audio2)) {
-        //     out1 = RingMod(delay1, in2);
-        //     out2 = RingMod(delay2, in2);
-        // }
 
         // Mix delays and output
         int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
         if (SwitchVal() == Switch::Up){
             // Limit (after tape saturation)
-            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 32767u) / 4095u);
+            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
             lim_.setThresholdQ15(thrQ15);
             int16_t outsat = sat.process(out);
             int16_t outl = sat12(lim_.process(outsat));
