@@ -437,7 +437,7 @@ public:
         }
         else {
             // Limit (no tape saturation)
-            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 32767u) / 4095u);
+            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
             lim_.setThresholdQ15(thrQ15);
             // int16_t outsat = sat.process(out);
             int16_t outl = sat12(lim_.process(out));
