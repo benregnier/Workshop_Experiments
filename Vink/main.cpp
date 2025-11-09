@@ -14,8 +14,8 @@
 		- Compressor/limiter end of chain
 
 	Control Mapping:
-		Knob::Main: shared delay timing control (becomes attenuator for CVIn1 when patched)
-		Knob::X: delay timing spread (becomes attenuator for CVIn2 when patched)
+                Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
+                Knob::X: delay timing spread (averaged with CVIn2 when patched)
 		Knob::Y: limiter volume
 
 		AudioIn1: Audio In
@@ -323,10 +323,85 @@ class Vink : public ComputerCard
     static constexpr uint32_t kMaxDelaySamples = (kSampleRate * kMaxDelayMs) / 1000u;
     static constexpr uint32_t kMaxDelaySamplesFP16 = kMaxDelaySamples << 16;
     static constexpr uint32_t kMinDelaySamplesFP16 = 1u << 16; // ensure at least one sample of delay
+    static constexpr uint32_t kDelayRangeSamplesFP16 = kMaxDelaySamplesFP16 - kMinDelaySamplesFP16;
 
     static constexpr uint32_t msToFP16(uint32_t ms){
         return (uint32_t)(((uint64_t)kSampleRate * ms << 16) / 1000u);
     }
+
+    struct SlowChaosLFO {
+        void configure(float seed, float rate, float smooth, uint32_t updateIntervalSamples){
+            logistic_q31_ = floatToUnsignedQ31(seed);
+            if (logistic_q31_ <= 0u) logistic_q31_ = 1u;
+            r_q30_ = floatToQ30(rate);
+            if (r_q30_ < (1u << 30)) r_q30_ = (1u << 30);
+            smoothing_q31_ = floatToQ31(smooth);
+            if (smoothing_q31_ == 0u) smoothing_q31_ = 1u;
+            interval_ = updateIntervalSamples ? updateIntervalSamples : 1u;
+            counter_ = interval_;
+            target_q31_ = signedFromUnsigned(logistic_q31_);
+            value_q31_ = target_q31_;
+        }
+
+        inline int32_t step(){
+            if (--counter_ == 0u) {
+                counter_ = interval_;
+                uint32_t x = logistic_q31_;
+                uint32_t one_minus_x = 0x7FFFFFFFu - x;
+                if (one_minus_x == 0u) {
+                    // avoid degeneracy
+                    one_minus_x = 1u;
+                    if (x > 1u) {
+                        x -= 1u;
+                    }
+                }
+                uint64_t prod = (uint64_t)x * (uint64_t)one_minus_x;          // Q1.31 * Q1.31 -> Q2.62
+                uint32_t mid = (uint32_t)(prod >> 31);                         // back to Q1.31
+                uint64_t next = (uint64_t)r_q30_ * (uint64_t)mid;              // Q2.30 * Q1.31 -> Q3.61
+                next >>= 30;                                                   // -> Q1.31 range
+                if (next <= 0u) next = 1u;
+                if (next >= 0x7FFFFFFEu) next = 0x7FFFFFFEu;
+                logistic_q31_ = (uint32_t)next;
+                target_q31_ = signedFromUnsigned(logistic_q31_);
+            }
+
+            int64_t diff = (int64_t)target_q31_ - (int64_t)value_q31_;
+            int64_t delta = (diff * (int64_t)smoothing_q31_) >> 31;            // Q1.31
+            value_q31_ += (int32_t)delta;
+            return value_q31_;
+        }
+
+    private:
+        static uint32_t floatToUnsignedQ31(float v){
+            if (v <= 0.0f) return 1u;
+            if (v >= 0.999999f) return 0x7FFFFFFEu;
+            return (uint32_t)(v * 2147483647.0f);
+        }
+
+        static uint32_t floatToQ30(float v){
+            if (v <= 0.0f) return 0u;
+            if (v >= 3.999999f) return 0xFFFFFFFFu;
+            return (uint32_t)(v * (float)(1u << 30));
+        }
+
+        static uint32_t floatToQ31(float v){
+            if (v <= 0.0f) return 0u;
+            if (v >= 0.999999f) return 0x7FFFFFFFu;
+            return (uint32_t)(v * 2147483647.0f);
+        }
+
+        static int32_t signedFromUnsigned(uint32_t v){
+            return (int32_t)(((int64_t)v << 1) - 0x7FFFFFFFLL);
+        }
+
+        uint32_t logistic_q31_{1u};
+        uint32_t r_q30_{1u << 30};
+        uint32_t smoothing_q31_{1u};
+        uint32_t interval_{1u};
+        uint32_t counter_{1u};
+        int32_t  target_q31_{0};
+        int32_t  value_q31_{0};
+    };
 
 public:
     Vink()
@@ -354,6 +429,9 @@ public:
         uint32_t initDelay2Samples = std::max<uint32_t>(1u, (dl2_.currentDelaySamplesFP16() + 0x8000u) >> 16);
         pulseInterval2_ = std::max<uint32_t>(1u, initDelay2Samples / 2u);
         pulseCountdown2_ = pulseInterval2_;
+
+        lfo1_.configure(0.412345f, 3.9935f, 2.0e-7f, 32768u);
+        lfo2_.configure(0.762531f, 3.9855f, 3.0e-7f, 16384u);
     }
 
     void ProcessSample() override
@@ -375,27 +453,58 @@ public:
         uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
         uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
         //uint32_t mult_fp16 = (KnobVal(Knob::X) * 16u) / 4095u; // 0..128 in Q7
-        // uint32_t half_spread_fp16 = spread_fp16 >> 1;
 
-        uint32_t delay1_fp16 = center_fp16;
-        if (delay1_fp16 > kMaxDelaySamplesFP16) {
-            delay1_fp16 = kMaxDelaySamplesFP16;
+        int64_t delay1_fp16 = (int64_t)center_fp16;
+        if (delay1_fp16 < (int64_t)kMinDelaySamplesFP16) {
+            delay1_fp16 = (int64_t)kMinDelaySamplesFP16;
         }
-        if (delay1_fp16 < kMinDelaySamplesFP16) {
-            delay1_fp16 = kMinDelaySamplesFP16;
+        if (Connected(Input::CV1)) {
+            int64_t knobDelay = delay1_fp16;
+            int32_t cv1 = CVIn1(); // -2048 .. +2047
+            // Map bipolar CV to a full-range offset and average it with the knob target.
+            int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv1) / 2048;
+            int64_t cvTarget = knobDelay + offset;
+            if (cvTarget > (int64_t)kMaxDelaySamplesFP16) {
+                cvTarget = (int64_t)kMaxDelaySamplesFP16;
+            }
+            if (cvTarget < (int64_t)kMinDelaySamplesFP16) {
+                cvTarget = (int64_t)kMinDelaySamplesFP16;
+            }
+            delay1_fp16 = (knobDelay + cvTarget) >> 1;
         }
-        dl1_.setDelaySamplesFP16(delay1_fp16);
+        if (delay1_fp16 > (int64_t)kMaxDelaySamplesFP16) {
+            delay1_fp16 = (int64_t)kMaxDelaySamplesFP16;
+        }
+        if (delay1_fp16 < (int64_t)kMinDelaySamplesFP16) {
+            delay1_fp16 = (int64_t)kMinDelaySamplesFP16;
+        }
+        dl1_.setDelaySamplesFP16((uint32_t)delay1_fp16);
 
-        // uint32_t delay2_fp16 = (center_fp16 > half_spread_fp16) ? (center_fp16 - half_spread_fp16) : center_fp16;
-        uint32_t delay2_fp16 = center_fp16 + spread_fp16;
-        // uint32_t delay2_fp16 = center_fp16 * mult_fp16;
-        if (delay2_fp16 > kMaxDelaySamplesFP16) {
-            delay2_fp16 = kMaxDelaySamplesFP16;
+        int64_t delay2_fp16 = (int64_t)center_fp16 + (int64_t)spread_fp16;
+        if (delay2_fp16 < (int64_t)kMinDelaySamplesFP16) {
+            delay2_fp16 = (int64_t)kMinDelaySamplesFP16;
         }
-        if (delay2_fp16 < kMinDelaySamplesFP16) {
-            delay2_fp16 = kMinDelaySamplesFP16;
+        if (Connected(Input::CV2)) {
+            int64_t knobDelay = delay2_fp16;
+            int32_t cv2 = CVIn2();
+            // Map bipolar CV to a full-range offset and average it with the knob target.
+            int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv2) / 2048;
+            int64_t cvTarget = knobDelay + offset;
+            if (cvTarget > (int64_t)kMaxDelaySamplesFP16) {
+                cvTarget = (int64_t)kMaxDelaySamplesFP16;
+            }
+            if (cvTarget < (int64_t)kMinDelaySamplesFP16) {
+                cvTarget = (int64_t)kMinDelaySamplesFP16;
+            }
+            delay2_fp16 = (knobDelay + cvTarget) >> 1;
         }
-        dl2_.setDelaySamplesFP16(delay2_fp16);
+        if (delay2_fp16 > (int64_t)kMaxDelaySamplesFP16) {
+            delay2_fp16 = (int64_t)kMaxDelaySamplesFP16;
+        }
+        if (delay2_fp16 < (int64_t)kMinDelaySamplesFP16) {
+            delay2_fp16 = (int64_t)kMinDelaySamplesFP16;
+        }
+        dl2_.setDelaySamplesFP16((uint32_t)delay2_fp16);
 
         // Update pulse outputs so they track the audible delay times
         {
@@ -466,6 +575,17 @@ public:
             LedBrightness(1, led_from_audio12(outl));
         }
 
+        int32_t lfo1 = lfo1_.step();
+        int32_t lfo2 = lfo2_.step();
+        int32_t cvOut1 = lfo1 >> 20; // Q1.31 -> approx ±2048
+        int32_t cvOut2 = lfo2 >> 20;
+        if (cvOut1 < -2048) cvOut1 = -2048;
+        if (cvOut1 > 2047) cvOut1 = 2047;
+        if (cvOut2 < -2048) cvOut2 = -2048;
+        if (cvOut2 > 2047) cvOut2 = 2047;
+        CVOut1((int16_t)cvOut1);
+        CVOut2((int16_t)cvOut2);
+
     }
 
 private:
@@ -479,6 +599,8 @@ private:
     uint32_t pulseCountdown2_{1};
     bool pulseState1_{false};
     bool pulseState2_{false};
+    SlowChaosLFO lfo1_;
+    SlowChaosLFO lfo2_;
 };
 
 
