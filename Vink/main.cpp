@@ -27,8 +27,8 @@
 
 		AudioOut1: Tap 1 or shared
 		AudioOut2: Tap 2 if split
-		CVOut1: Superslow chaotic LFO 1
-        CVOut2: Superslow chaotic LFO 2
+		CVOut1: Super-slow chaotic LFO 1
+        CVOut2: Super-slow chaotic LFO 2
         PulseOut1: pulse tracking delay 1 time
         PulseOut2: pulse tracking delay 2 time
 */
