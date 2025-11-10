@@ -15,7 +15,7 @@
 
 	Control Mapping:
         Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
-        Knob::X: delay timing spread (averaged with CVIn2 when patched)
+        Knob::X: Second tap delay - offset from tap 1 (averaged with CVIn2 when patched)
 		Knob::Y: limiter volume
         Switch: Up = tape saturation + limiter; Center/Mom = limiter only
 
