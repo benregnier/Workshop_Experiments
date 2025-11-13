@@ -17,7 +17,8 @@
         Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
         Knob::X: Second tap delay - offset from tap 1 (averaged with CVIn2 when patched)
 		Knob::Y: limiter volume
-        Switch: Up = tape saturation + limiter; Center/Mom = limiter only
+        Switch: Up = split inputs/outputs (parallel taps); Center = shared mix
+                Momentary Down: toggles tape saturation on/off
 
     Inputs/Outputs:
 		AudioIn1: Audio In
@@ -411,7 +412,8 @@ public:
     Vink()
         : dl1_(kSampleRate, kMaxDelayMs),
           dl2_(kSampleRate, kMaxDelayMs),
-          lim_(kSampleRate, 1.0f, 100.0f, 29491, 1000)
+          lim_(kSampleRate, 1.0f, 100.0f, 29491, 1000),
+          lim2_(kSampleRate, 1.0f, 100.0f, 29491, 1000)
     {
         dl1_.setDelaySamplesFP16(msToFP16(100));
         dl1_.setSlewPerSecondMs(200.0f);
@@ -422,6 +424,11 @@ public:
         sat.driveQ15   = 16000;   // ~0.75 =24576
         sat.makeupQ15  = 16000;   // ~0.75 =24576
         sat.biasQ15    = 128;     // slight asymmetry
+        sat2.preHP.lp.a = sat.preHP.lp.a;
+        sat2.postLP.a   = sat.postLP.a;
+        sat2.driveQ15   = sat.driveQ15;
+        sat2.makeupQ15  = sat.makeupQ15;
+        sat2.biasQ15    = sat.biasQ15;
 
         PulseOut1(false);
         PulseOut2(false);
@@ -440,16 +447,30 @@ public:
 
     void ProcessSample() override
     {
+        Switch sw = SwitchVal();
+        if (SwitchChanged() && sw == Switch::Down) {
+            saturationEnabled_ = !saturationEnabled_;
+            if (!saturationEnabled_) {
+                sat.clear();
+                sat2.clear();
+            }
+        }
+        bool splitMode = (sw == Switch::Up);
+
         // 2 delay lines
         int16_t in1 = AudioIn1();
         int16_t in2 = AudioIn2();
-        int16_t in = in1;
-        if (Connected(Input::Audio2)) {
-            in = (int16_t)((in1 + in2) >> 1);
+        bool audio2Connected = Connected(Input::Audio2);
+        int16_t sharedIn = in1;
+        if (audio2Connected) {
+            sharedIn = (int16_t)((in1 + in2) >> 1);
         }
 
-        int16_t delay1 = dl1_.process(in);  // delayed only (you mix elsewhere)
-        int16_t delay2 = dl2_.process(in);
+        int16_t delayInput1 = splitMode ? in1 : sharedIn;
+        int16_t delayInput2 = splitMode ? (audio2Connected ? in2 : sharedIn) : sharedIn;
+
+        int16_t delay1 = dl1_.process(delayInput1);  // delayed only (you mix elsewhere)
+        int16_t delay2 = dl2_.process(delayInput2);
 
         // Modulate without clicks (two common options):
         // A) Block-by-block sweep (slew handles smoothing)
@@ -553,30 +574,34 @@ public:
 
 
         // Mix delays and output
-        int16_t out = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
-        if (SwitchVal() == Switch::Up){
-            // Limit (after tape saturation)
-            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
-            lim_.setThresholdQ15(thrQ15);
-            int16_t outsat = sat.process(out);
-            int16_t outl = sat12(lim_.process(outsat));
-            // Output
-            AudioOut1(outl);
-            AudioOut2(outl);
-            LedBrightness(0, led_from_audio12(outl));
-            LedBrightness(1, led_from_audio12(outl));
-        }
-        else {
-            // Limit (no tape saturation)
-            uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
-            lim_.setThresholdQ15(thrQ15);
-            // int16_t outsat = sat.process(out);
-            int16_t outl = sat12(lim_.process(out));
-            // Output
-            AudioOut1(outl);
-            AudioOut2(outl);
-            LedBrightness(0, led_from_audio12(outl));
-            LedBrightness(1, led_from_audio12(outl));
+        uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
+        lim_.setThresholdQ15(thrQ15);
+        lim2_.setThresholdQ15(thrQ15);
+
+        if (splitMode) {
+            int16_t proc1 = delay1;
+            int16_t proc2 = delay2;
+            if (saturationEnabled_) {
+                proc1 = sat.process(proc1);
+                proc2 = sat2.process(proc2);
+            }
+            int16_t out1 = sat12(lim_.process(proc1));
+            int16_t out2 = sat12(lim2_.process(proc2));
+            AudioOut1(out1);
+            AudioOut2(out2);
+            LedBrightness(0, led_from_audio12(out1));
+            LedBrightness(1, led_from_audio12(out2));
+        } else {
+            int16_t mix = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
+            int16_t proc = mix;
+            if (saturationEnabled_) {
+                proc = sat.process(mix);
+            }
+            int16_t outMono = sat12(lim_.process(proc));
+            AudioOut1(outMono);
+            AudioOut2(outMono);
+            LedBrightness(0, led_from_audio12(outMono));
+            LedBrightness(1, led_from_audio12(outMono));
         }
 
         int32_t lfo1 = lfo1_.step();
@@ -599,6 +624,9 @@ private:
     SmoothDelay dl2_;
     FixedRatioLimiter lim_;
     TapeSaturator sat;
+    FixedRatioLimiter lim2_;
+    TapeSaturator sat2;
+    bool saturationEnabled_{true};
     uint32_t pulseInterval1_{1};
     uint32_t pulseInterval2_{1};
     uint32_t pulseCountdown1_{1};
