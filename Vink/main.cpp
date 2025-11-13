@@ -78,8 +78,14 @@ struct OnePoleHP {
 };
 
 // ---------- soft clipper (tape-ish) ----------
-// Cubic soft clip: y = x - (x^3)/3, all in Q15.
-// Drive boosts input into curve; makeup = post-gain.
+/**
+ * @brief Lightweight tape-style saturator with gentle cubic soft clipping.
+ *
+ * The processor runs in the Q15 fixed-point domain. Drive boosts the input into
+ * the non-linearity, makeup restores level afterwards, and a small bias allows
+ * for asymmetry. Pre- and post-filters are kept but can be disabled by leaving
+ * their coefficients at zero.
+ */
 struct TapeSaturator {
     // Controls (Q15): 32767 ≈ 1.0
     uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
@@ -131,7 +137,14 @@ static inline int16_t RingMod(int16_t a, int16_t b)
     return (int16_t)prod;
 }
 
-// One-pole envelope + fixed-ratio gain computer (Q15 domain)
+/**
+ * @brief One-pole envelope follower plus fixed-ratio gain computer.
+ *
+ * The limiter approximates a fixed-ratio compressor by applying a smoothed peak
+ * detector to the input and computing a gain value in the Q15 domain. The
+ * entire inner loop is integer math so the expensive coefficient calculation is
+ * performed only when the attack/release values change.
+ */
 class FixedRatioLimiter {
 public:
     // sampleRate: e.g., 48000
@@ -207,6 +220,13 @@ private:
     uint16_t env_{0};        // envelope in Q15 (0..32767)
 };
 
+/**
+ * @brief Delay line with click-free modulation.
+ *
+ * Internally stores the delay time in 16.16 fixed-point samples and slews toward
+ * a target value to avoid zippering. The buffer size is rounded up to the next
+ * power of two so wrapping becomes a bitmask operation.
+ */
 class SmoothDelay {
 public:
     // maxDelayMs: upper bound (e.g., 1000 = 1s)
@@ -321,6 +341,14 @@ private:
     bool initialised_;
 };
 
+/**
+ * @brief Implementation of the Vink dual-delay feedback card.
+ *
+ * The class encapsulates the full signal flow for the instrument described at
+ * the top of the file. It keeps the runtime hot path compact by offering small
+ * helper utilities that encapsulate repeated tasks (delay computation,
+ * saturation toggling, pulse generation, etc.).
+ */
 class Vink : public ComputerCard
 {
     static constexpr uint32_t kSampleRate = 48000u;
@@ -334,6 +362,9 @@ class Vink : public ComputerCard
         return (uint32_t)(((uint64_t)kSampleRate * ms << 16) / 1000u);
     }
 
+    /**
+     * @brief Chaotic logistic-map LFO with heavy smoothing.
+     */
     struct SlowChaosLFO {
         void configure(float seed, float rate, float smooth, uint32_t updateIntervalSamples){
             logistic_q31_ = floatToUnsignedQ31(seed);
@@ -415,36 +446,21 @@ public:
           lim_(kSampleRate, 1.0f, 100.0f, 29491, 1000),
           lim2_(kSampleRate, 1.0f, 100.0f, 29491, 1000)
     {
-        dl1_.setDelaySamplesFP16(msToFP16(100));
-        dl1_.setSlewPerSecondMs(200.0f);
-        dl2_.setDelaySamplesFP16(msToFP16(50));
-        dl2_.setSlewPerSecondMs(200.0f);
-        sat.preHP.lp.a = 3000;    // pre-emphasis strength
-        sat.postLP.a   = 2000;    // de-emphasis/AA smoothing
-        sat.driveQ15   = 16000;   // ~0.75 =24576
-        sat.makeupQ15  = 16000;   // ~0.75 =24576
-        sat.biasQ15    = 128;     // slight asymmetry
-        sat2.preHP.lp.a = sat.preHP.lp.a;
-        sat2.postLP.a   = sat.postLP.a;
-        sat2.driveQ15   = sat.driveQ15;
-        sat2.makeupQ15  = sat.makeupQ15;
-        sat2.biasQ15    = sat.biasQ15;
+        initialiseDelay(dl1_, msToFP16(100));
+        initialiseDelay(dl2_, msToFP16(50));
+        sat = makeSaturator();
+        sat2 = makeSaturator();
 
         PulseOut1(false);
         PulseOut2(false);
-
-        uint32_t initDelay1Samples = std::max<uint32_t>(1u, (dl1_.currentDelaySamplesFP16() + 0x8000u) >> 16);
-        pulseInterval1_ = std::max<uint32_t>(1u, initDelay1Samples / 2u);
-        pulseCountdown1_ = pulseInterval1_;
-
-        uint32_t initDelay2Samples = std::max<uint32_t>(1u, (dl2_.currentDelaySamplesFP16() + 0x8000u) >> 16);
-        pulseInterval2_ = std::max<uint32_t>(1u, initDelay2Samples / 2u);
-        pulseCountdown2_ = pulseInterval2_;
 
         lfo1_.configure(0.412345f, 3.9700f, 3.0e-7f, 16384u); //0.412345f, 3.9935f, 2.0e-7f, 32768u
         lfo2_.configure(0.762531f, 3.9500f, 4.0e-7f, 12384u); //0.762531f, 3.9855f, 3.0e-7f, 16384u
     }
 
+    /**
+     * @brief Audio callback executed once per sample.
+     */
     void ProcessSample() override
     {
         Switch sw = SwitchVal();
@@ -472,132 +488,86 @@ public:
         int16_t delay1 = dl1_.process(delayInput1);  // delayed only (you mix elsewhere)
         int16_t delay2 = dl2_.process(delayInput2);
 
-        // Modulate without clicks (two common options):
-        // A) Block-by-block sweep (slew handles smoothing)
-        // Knob values map directly to 16.16 sample counts so the control operates in samples.
-        uint32_t center_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::Main) * kMaxDelaySamplesFP16) / 4095u);
-        uint32_t spread_fp16 = (uint32_t)(((uint64_t)KnobVal(Knob::X) * kMaxDelaySamplesFP16) / 4095u);
-        //uint32_t mult_fp16 = (KnobVal(Knob::X) * 16u) / 4095u; // 0..128 in Q7
+        uint32_t center_fp16 = knobToDelayFP16(KnobVal(Knob::Main));
+        uint32_t spread_fp16 = knobToDelayFP16(KnobVal(Knob::X));
 
-        int64_t delay1_fp16 = (int64_t)center_fp16;
-        if (delay1_fp16 < (int64_t)kMinDelaySamplesFP16) {
-            delay1_fp16 = (int64_t)kMinDelaySamplesFP16;
-        }
+        uint32_t delay1_fp16 = clampDelayFP16(center_fp16);
         if (Connected(Input::CV1)) {
-            int64_t knobDelay = delay1_fp16;
-            int32_t cv1 = CVIn1(); // -2048 .. +2047
-            // Map bipolar CV to a full-range offset and average it with the knob target.
-            int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv1) / 2048;
-            int64_t cvTarget = knobDelay + offset;
-            if (cvTarget > (int64_t)kMaxDelaySamplesFP16) {
-                cvTarget = (int64_t)kMaxDelaySamplesFP16;
-            }
-            if (cvTarget < (int64_t)kMinDelaySamplesFP16) {
-                cvTarget = (int64_t)kMinDelaySamplesFP16;
-            }
-            delay1_fp16 = (knobDelay + cvTarget) >> 1;
+            delay1_fp16 = averageWithCv(delay1_fp16, CVIn1());
         }
-        if (delay1_fp16 > (int64_t)kMaxDelaySamplesFP16) {
-            delay1_fp16 = (int64_t)kMaxDelaySamplesFP16;
-        }
-        if (delay1_fp16 < (int64_t)kMinDelaySamplesFP16) {
-            delay1_fp16 = (int64_t)kMinDelaySamplesFP16;
-        }
-        dl1_.setDelaySamplesFP16((uint32_t)delay1_fp16);
 
-        int64_t delay2_fp16 = (int64_t)center_fp16 + (int64_t)spread_fp16;
-        if (delay2_fp16 < (int64_t)kMinDelaySamplesFP16) {
-            delay2_fp16 = (int64_t)kMinDelaySamplesFP16;
-        }
+        uint32_t delay2_fp16 = clampDelayFP16((int64_t)center_fp16 + spread_fp16);
         if (Connected(Input::CV2)) {
-            int64_t knobDelay = delay2_fp16;
-            int32_t cv2 = CVIn2();
-            // Map bipolar CV to a full-range offset and average it with the knob target.
-            int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv2) / 2048;
-            int64_t cvTarget = knobDelay + offset;
-            if (cvTarget > (int64_t)kMaxDelaySamplesFP16) {
-                cvTarget = (int64_t)kMaxDelaySamplesFP16;
-            }
-            if (cvTarget < (int64_t)kMinDelaySamplesFP16) {
-                cvTarget = (int64_t)kMinDelaySamplesFP16;
-            }
-            delay2_fp16 = (knobDelay + cvTarget) >> 1;
+            delay2_fp16 = averageWithCv(delay2_fp16, CVIn2());
         }
-        if (delay2_fp16 > (int64_t)kMaxDelaySamplesFP16) {
-            delay2_fp16 = (int64_t)kMaxDelaySamplesFP16;
-        }
-        if (delay2_fp16 < (int64_t)kMinDelaySamplesFP16) {
-            delay2_fp16 = (int64_t)kMinDelaySamplesFP16;
-        }
-        dl2_.setDelaySamplesFP16((uint32_t)delay2_fp16);
 
-        // Update pulse outputs so they track the audible delay times
-        {
-            uint32_t delaySamples1 = std::max<uint32_t>(1u, (dl1_.currentDelaySamplesFP16() + 0x8000u) >> 16);
-            uint32_t desiredInterval1 = delaySamples1 / 2u;
-            if (desiredInterval1 == 0) desiredInterval1 = 1u;
-            if (pulseInterval1_ != desiredInterval1) {
-                pulseInterval1_ = desiredInterval1;
-                if (pulseCountdown1_ > pulseInterval1_) {
-                    pulseCountdown1_ = pulseInterval1_;
+        dl1_.setDelaySamplesFP16(delay1_fp16);
+        dl2_.setDelaySamplesFP16(delay2_fp16);
+
+        auto updatePulse = [&](uint32_t delay_fp16,
+                               uint32_t& countdown,
+                               uint32_t& hold,
+                               bool& state,
+                               auto&& setter){
+            uint32_t periodSamples = std::max<uint32_t>(1u, (delay_fp16 + 0x8000u) >> 16);
+            if (countdown > periodSamples) {
+                countdown = periodSamples;
+            }
+
+            bool triggered = false;
+            if (countdown == 0u) {
+                countdown = periodSamples;
+                if (!state) {
+                    state = true;
+                    setter(true);
+                }
+                hold = std::max<uint32_t>(1u, periodSamples >> 2);
+                triggered = true;
+            } else {
+                countdown--;
+            }
+
+            if (state && !triggered) {
+                if (hold > 0u) {
+                    hold--;
+                    if (hold == 0u) {
+                        state = false;
+                        setter(false);
+                    }
                 }
             }
-            if (pulseCountdown1_ <= 1u) {
-                pulseState1_ = !pulseState1_;
-                PulseOut1(pulseState1_);
-                LedOn(4, pulseState1_); // debug
-                pulseCountdown1_ = pulseInterval1_;
-            } else {
-                pulseCountdown1_--;
-            }
-        }
+        };
 
-        {
-            uint32_t delaySamples2 = std::max<uint32_t>(1u, (dl2_.currentDelaySamplesFP16() + 0x8000u) >> 16);
-            uint32_t desiredInterval2 = delaySamples2 / 2u;
-            if (desiredInterval2 == 0) desiredInterval2 = 1u;
-            if (pulseInterval2_ != desiredInterval2) {
-                pulseInterval2_ = desiredInterval2;
-                if (pulseCountdown2_ > pulseInterval2_) {
-                    pulseCountdown2_ = pulseInterval2_;
-                }
-            }
-            if (pulseCountdown2_ <= 1u) {
-                pulseState2_ = !pulseState2_;
-                PulseOut2(pulseState2_);
-                LedOn(5, pulseState2_); // debug
-                pulseCountdown2_ = pulseInterval2_;
-            } else {
-                pulseCountdown2_--;
-            }
-        }
+        updatePulse(delay1_fp16,
+                    pulseCountdown1_,
+                    pulseHold1_,
+                    pulseState1_,
+                    [this](bool v){ PulseOut1(v); LedOn(4, v); });
 
+        updatePulse(delay2_fp16,
+                    pulseCountdown2_,
+                    pulseHold2_,
+                    pulseState2_,
+                    [this](bool v){ PulseOut2(v); LedOn(5, v); });
 
-        // Mix delays and output
-        uint16_t thrQ15 = (uint16_t)(((uint32_t)KnobVal(Knob::Y) * 4095u) / 4095u);
+        uint16_t thrQ15 = knobToQ15(KnobVal(Knob::Y));
         lim_.setThresholdQ15(thrQ15);
         lim2_.setThresholdQ15(thrQ15);
 
+        auto applySaturation = [this](int16_t sample, TapeSaturator& s){
+            return saturationEnabled_ ? s.process(sample) : sample;
+        };
+
         if (splitMode) {
-            int16_t proc1 = delay1;
-            int16_t proc2 = delay2;
-            if (saturationEnabled_) {
-                proc1 = sat.process(proc1);
-                proc2 = sat2.process(proc2);
-            }
-            int16_t out1 = sat12(lim_.process(proc1));
-            int16_t out2 = sat12(lim2_.process(proc2));
+            int16_t out1 = sat12(lim_.process(applySaturation(delay1, sat)));
+            int16_t out2 = sat12(lim2_.process(applySaturation(delay2, sat2)));
             AudioOut1(out1);
             AudioOut2(out2);
             LedBrightness(0, led_from_audio12(out1));
             LedBrightness(1, led_from_audio12(out2));
         } else {
             int16_t mix = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
-            int16_t proc = mix;
-            if (saturationEnabled_) {
-                proc = sat.process(mix);
-            }
-            int16_t outMono = sat12(lim_.process(proc));
+            int16_t outMono = sat12(lim_.process(applySaturation(mix, sat)));
             AudioOut1(outMono);
             AudioOut2(outMono);
             LedBrightness(0, led_from_audio12(outMono));
@@ -620,6 +590,41 @@ public:
     }
 
 private:
+    static TapeSaturator makeSaturator(){
+        TapeSaturator s;
+        s.preHP.lp.a = 3000;
+        s.postLP.a   = 2000;
+        s.driveQ15   = 16000;
+        s.makeupQ15  = 16000;
+        s.biasQ15    = 128;
+        return s;
+    }
+
+    static void initialiseDelay(SmoothDelay& delay, uint32_t defaultDelay){
+        delay.setDelaySamplesFP16(defaultDelay);
+        delay.setSlewPerSecondMs(200.0f);
+    }
+
+    static uint32_t clampDelayFP16(int64_t value){
+        if (value < (int64_t)kMinDelaySamplesFP16) return kMinDelaySamplesFP16;
+        if (value > (int64_t)kMaxDelaySamplesFP16) return kMaxDelaySamplesFP16;
+        return (uint32_t)value;
+    }
+
+    static uint16_t knobToQ15(uint16_t knob){
+        return (uint16_t)(((uint32_t)knob * 32767u) / 4095u);
+    }
+
+    static uint32_t knobToDelayFP16(uint16_t knob){
+        return (uint32_t)(((uint64_t)knob * kMaxDelaySamplesFP16) / 4095u);
+    }
+
+    static uint32_t averageWithCv(uint32_t knobTarget, int16_t cv){
+        int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv) / 2048;
+        int64_t cvTarget = (int64_t)knobTarget + offset;
+        return (uint32_t)(((int64_t)knobTarget + (int64_t)clampDelayFP16(cvTarget)) >> 1);
+    }
+
     SmoothDelay dl1_;
     SmoothDelay dl2_;
     FixedRatioLimiter lim_;
@@ -627,10 +632,10 @@ private:
     FixedRatioLimiter lim2_;
     TapeSaturator sat2;
     bool saturationEnabled_{true};
-    uint32_t pulseInterval1_{1};
-    uint32_t pulseInterval2_{1};
-    uint32_t pulseCountdown1_{1};
-    uint32_t pulseCountdown2_{1};
+    uint32_t pulseCountdown1_{0};
+    uint32_t pulseCountdown2_{0};
+    uint32_t pulseHold1_{0};
+    uint32_t pulseHold2_{0};
     bool pulseState1_{false};
     bool pulseState2_{false};
     SlowChaosLFO lfo1_;
