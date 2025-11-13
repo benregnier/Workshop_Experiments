@@ -419,9 +419,9 @@ public:
         dl2_.setSlewPerSecondMs(200.0f);
         sat.preHP.lp.a = 3000;    // pre-emphasis strength
         sat.postLP.a   = 2000;    // de-emphasis/AA smoothing
-        sat.driveQ15   = 24576;   // ~0.75
-        sat.makeupQ15  = 24576;   // ~0.75
-        sat.biasQ15    = 512;     // slight asymmetry
+        sat.driveQ15   = 16000;   // ~0.75 =24576
+        sat.makeupQ15  = 16000;   // ~0.75 =24576
+        sat.biasQ15    = 128;     // slight asymmetry
 
         PulseOut1(false);
         PulseOut2(false);
@@ -434,8 +434,8 @@ public:
         pulseInterval2_ = std::max<uint32_t>(1u, initDelay2Samples / 2u);
         pulseCountdown2_ = pulseInterval2_;
 
-        lfo1_.configure(0.412345f, 3.9935f, 2.0e-7f, 32768u);
-        lfo2_.configure(0.762531f, 3.9855f, 3.0e-7f, 16384u);
+        lfo1_.configure(0.412345f, 3.9700f, 3.0e-7f, 16384u); //0.412345f, 3.9935f, 2.0e-7f, 32768u
+        lfo2_.configure(0.762531f, 3.9500f, 4.0e-7f, 12384u); //0.762531f, 3.9855f, 3.0e-7f, 16384u
     }
 
     void ProcessSample() override
