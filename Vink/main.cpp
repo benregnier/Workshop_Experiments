@@ -145,9 +145,7 @@ static inline int16_6 SigSat(int16_t x) // Thanks to Allsnop @ the serge discord
 		xabs = x * -1;
 	}
 	int32_t xsat = (x / (1 + xabs)) << 11;
-    if (xsat < -2048) xsat = -2048;
-    if (xsat >  2047) xsat =  2047;
-	return (int16_t)xsat;	
+	return (int16_t)sat12(xsat);	
 }
 
 /**
