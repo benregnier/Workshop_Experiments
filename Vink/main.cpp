@@ -55,15 +55,17 @@ static inline uint16_t led_from_audio12(int16_t x){
     return static_cast<uint16_t>(std::clamp<int32_t>(v, 0, 4095));
 }
 
-static inline uint16_t knobToMixQ16(uint16_t knob){
-    return static_cast<uint16_t>(((uint32_t)knob << 16) / 4095u);
+static inline uint32_t knobToMixQ16(uint16_t knob){
+    uint32_t mix = ((uint32_t)knob << 16) / 4095u;
+    if (mix > 65536u) mix = 65536u;
+    return mix;
 }
 
-static inline int16_t mixDryWet(int16_t dry, int16_t wet, uint16_t mixQ16){
-    uint32_t wetMix = mixQ16;
-    uint32_t dryMix = 65535u - wetMix;
-    int32_t blended = ( (int64_t)dry * (int64_t)dryMix + (int64_t)wet * (int64_t)wetMix ) >> 16;
-    return sat12(blended);
+static inline int16_t mixDryWet(int16_t dry, int16_t wet, uint32_t mixQ16){
+    uint32_t wetMix = std::min<uint32_t>(mixQ16, 65536u);
+    uint32_t dryMix = 65536u - wetMix;
+    int64_t blended = ( (int64_t)dry * (int64_t)dryMix + (int64_t)wet * (int64_t)wetMix ) >> 16;
+    return sat12((int32_t)blended);
 }
 
 static inline int16_t SigSat(int16_t x);
@@ -418,7 +420,7 @@ public:
                     pulseState2_,
                     [this](bool v){ PulseOut2(v); LedOn(5, v); });
 
-        uint16_t mixQ16 = knobToMixQ16(KnobVal(Knob::Y));
+        uint32_t mixQ16 = knobToMixQ16(KnobVal(Knob::Y));
         auto applyCrossfade = [mixQ16](int16_t dry, int16_t wet){
             return mixDryWet(dry, wet, mixQ16);
         };
