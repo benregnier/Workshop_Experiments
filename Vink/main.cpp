@@ -3,39 +3,45 @@
 #include <cstring>
 #include <algorithm>
 
-/* Vink
-        Dual delay loops with sigmoid saturation for Jaap Vink / Roland Kayn style feedback patching
-	For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
+/**
+ * @file main.cpp
+ * @brief Vink: dual delay loops with sigmoid saturation for Jaap Vink /
+ * Roland Kayn style feedback patching.
+ *
+ * Reference performance: https://www.youtube.com/watch?v=X_Bcr_HS9XM
+ *
+ * Blocks
+ *  - Two delay taps (≈250 ms max, down to 3 samples)
+ *  - Sigmoid soft clipper per tap (toggleable)
+ *
+ * Controls
+ *  - `Knob::Main`   : shared delay time, averaged with `CVIn1`
+ *  - `Knob::X`      : tap 2 offset from tap 1, averaged with `CVIn2`
+ *  - `Knob::Y`      : saturation drive
+ *  - `Switch::Up`   : split I/O; `Switch::Center` : shared mix
+ *  - `Switch::Down` : momentary toggle of tape saturation
+ *
+ * I/O mapping
+ *  - `AudioIn1/2` : summed if both patched
+ *  - `CVIn1/2`    : tap modulation (averaged with knobs)
+ *  - `AudioOut1`  : tap 1 or mono mix
+ *  - `AudioOut2`  : tap 2 (split) or mono mix
+ *  - `CVOut1/2`   : chaotic slow LFO pair
+ *  - `PulseOut1/2`: pulse tracks tap periods
+ */
 
-	Blocks:
-		- Two delay taps (approx 250ms max, down to 3 samples)
-        - Sigmoid soft clipper on combined delay output (switchable bypass)
-
-	Control Mapping:
-        Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
-        Knob::X: Second tap delay - offset from tap 1 (averaged with CVIn2 when patched)
-                Knob::Y: saturation drive
-        Switch: Up = split inputs/outputs (parallel taps); Center = shared mix
-                Momentary Down: toggles tape saturation on/off
-
-    Inputs/Outputs:
-		AudioIn1: Audio In
-		AudioIn2: Audio In (averaged with AudioIn1 if patched)
-		CVIn1: Tap 1 control (when patched averaged with Knob Main)
-		CVIn2: Tap 2 control (when patched averaged with Knob X)
-
-		AudioOut1: Tap 1 or shared
-		AudioOut2: Tap 2 if split
-		CVOut1: Super-slow chaotic LFO 1
-        CVOut2: Super-slow chaotic LFO 2
-        PulseOut1: pulse tracking delay 1 time
-        PulseOut2: pulse tracking delay 2 time
-*/
-
-// ---------- helpers ----------
-static inline int16_t sat16(int32_t x){ if(x>32767) return 32767; if(x<-32768) return -32768; return (int16_t)x; }
-static inline int16_t sat12(int32_t x){ if(x>2047) return 2047; if(x<-2048) return -2048; return (int16_t)x; }
+// === Helper utilities ========================================================
+/// Clamp a 32-bit value to the Q15 audio range.
+static inline int16_t sat16(int32_t x){
+    return static_cast<int16_t>(std::clamp<int32_t>(x, -32768, 32767));
+}
+/// Clamp a 32-bit value to the 12-bit audio range.
+static inline int16_t sat12(int32_t x){
+    return static_cast<int16_t>(std::clamp<int32_t>(x, -2048, 2047));
+}
+/// Convert packed 12-bit audio (JLC board format) to Q15.
 static inline int16_t audio12_to_q15(int16_t x){ return (int16_t)(((int32_t)x) << 4); }
+/// Convert Q15 back to packed 12-bit audio with rounding.
 static inline int16_t q15_to_audio12(int32_t x){
     int32_t rounded;
     if (x >= 0) {
@@ -46,16 +52,17 @@ static inline int16_t q15_to_audio12(int32_t x){
     return sat12(rounded);
 }
 static inline uint16_t led_from_audio12(int16_t x){
-    int16_t v = x + 2048;
-    if(v < 0) v = 0;
-    if(v > 4095) v = 4095;
-    return v;
+    int32_t v = static_cast<int32_t>(x) + 2048;
+    return static_cast<uint16_t>(std::clamp<int32_t>(v, 0, 4095));
 }
 
 static inline int16_t SigSat(int16_t x);
 
 
-// ---------- sigmoid saturator ----------
+// === Sigmoid saturation ======================================================
+/**
+ * @brief Scales input into the sigmoid wave-shaper domain.
+ */
 struct SigmoidSaturator {
     // Drive in Q12 (4096 ≈ 1.0). Range expanded via knob mapping.
     uint16_t driveQ12 = 4096;
@@ -66,16 +73,16 @@ struct SigmoidSaturator {
         return SigSat((int16_t)scaled);
     }
 
-    void setDriveQ12(uint16_t drive){
-        if (drive < 256) drive = 256;
-        driveQ12 = drive;
-    }
+    void setDriveQ12(uint16_t drive){ driveQ12 = std::max<uint16_t>(drive, 256u); }
 
     void clear(){}
 };
 
-// Sigmoid saturation function: x / (1 + |x|) approximated for 12-bit audio
-static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
+/**
+ * @brief Sigmoid saturator approximation x/(1+|x|) optimized for 12-bit audio.
+ * Thanks to Allsnop @ the Serge Discord!
+ */
+static inline int16_t SigSat(int16_t x)
 {
     int32_t ax = (x >= 0) ? x : -(int32_t)x;
     int32_t denom = 2048 + ax;          // 12-bit range + |x|
@@ -92,7 +99,11 @@ static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord
 }
 
 
-// ---------- smooth delay line ----------
+// === Delay lines =============================================================
+/**
+ * @brief Circular-buffer delay line with fp16 interpolation and slew-limited
+ * delay-time modulation.
+ */
 class SmoothDelay {
 public:
     // maxDelayMs: upper bound (e.g., 1000 = 1s)
