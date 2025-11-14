@@ -140,14 +140,18 @@ static inline int16_t RingMod(int16_t a, int16_t b)
 
 static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
 {
-	int32_t xabs = (x < 0) ? -x : x;  // |x|
-	if (x < 0) {
-		xabs = x * -1;
-	}
-    int32_t num = x * 2047;
-    int32_t denom = 1 + xabs;
-    int32_t xsat = num / denom;
-	return (int16_t)sat12(xsat);	
+    int32_t ax = (x >= 0) ? x : -(int32_t)x;
+    int32_t denom = 2048 + ax;          // 12-bit range + |x|
+    int32_t num   = (int32_t)x * 2047;  // target range scaling
+
+    if (num >= 0) {
+        num += denom / 2;               // round toward nearest
+    } else {
+        num -= denom / 2;
+    }
+
+    int32_t result = num / denom;
+    return sat12(result);
 }
 
 /**
