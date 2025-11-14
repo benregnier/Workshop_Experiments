@@ -53,6 +53,8 @@ static inline uint16_t led_from_audio12(int16_t x){
 }
 static inline int16_t mul_q15(int16_t a, int16_t b){ return (int16_t)(((int32_t)a * (int32_t)b) >> 15); }
 
+static inline int16_t SigSat(int16_t x);
+
 // One-pole (state-space) lowpass: y += a*(x - y), a in Q15
 struct OnePoleLP {
     int16_t y = 0;         // state in Q15
