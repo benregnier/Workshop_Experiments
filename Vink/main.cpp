@@ -86,6 +86,7 @@ struct OnePoleHP {
  * for asymmetry. Pre- and post-filters are kept but can be disabled by leaving
  * their coefficients at zero.
  */
+
 struct TapeSaturator {
     // Controls (Q15): 32767 ≈ 1.0
     uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
@@ -135,6 +136,18 @@ static inline int16_t RingMod(int16_t a, int16_t b)
     if (prod >  32767) prod =  32767;
     if (prod < -32768) prod = -32768;
     return (int16_t)prod;
+}
+
+static inline int16_6 SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
+{
+	int16_t xabs = (x < 0) ? -x : x;  // |x|
+	if (x < 0) {
+		xabs = x * -1;
+	}
+	int32_t xsat = (x / (1 + xabs)) << 11;
+    if (xsat < -2048) xsat = -2048;
+    if (xsat >  2047) xsat =  2047;
+	return (int16_t)xsat;	
 }
 
 /**
@@ -555,8 +568,10 @@ public:
         lim2_.setThresholdQ15(thrQ15);
 
         auto applySaturation = [this](int16_t sample, TapeSaturator& s){
-            return saturationEnabled_ ? s.process(sample) : sample;
+            //return saturationEnabled_ ? s.process(sample) : sample;
+			return saturationEnabled_ ? SigSat(sample) : sample;
         };
+		
 
         if (splitMode) {
             int16_t out1 = sat12(lim_.process(applySaturation(delay1, sat)));
