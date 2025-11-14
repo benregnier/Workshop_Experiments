@@ -17,8 +17,8 @@ A MS-20-style External Signal Processor that includes a preamp, bandpass filter,
 UF2 build at [ESP/build](./ESP/build)  
 PDF Documentation at [ESP/docs/ESP_Card_Doc](./ESP/docs/ESP_Card_Doc.pdf)  
 
-### Vink  
-Dual delay loops + tape saturation with a limiter for Jaap Vink / Roland Kayn style feedback patching 
+### Vink
+Dual delay loops with sigmoid saturation for Jaap Vink / Roland Kayn style feedback patching
 For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
 
 

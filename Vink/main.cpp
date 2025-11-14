@@ -1,22 +1,20 @@
 #include "ComputerCard.h"
 #include <cstdint>
 #include <cstring>
-#include <cmath>
 #include <algorithm>
 
 /* Vink
-	Dual delay loops + tape saturation with a limiter for Jaap Vink / Roland Kayn style feedback patching 
+        Dual delay loops with sigmoid saturation for Jaap Vink / Roland Kayn style feedback patching
 	For more info see this Mr Sonology Video: https://www.youtube.com/watch?v=X_Bcr_HS9XM
 
 	Blocks:
 		- Two delay taps (approx 250ms max, down to 3 samples)
-        - Tape-style soft clipper on combined delay output (switchable bypass)
-		- Compressor/limiter end of chain
+        - Sigmoid soft clipper on combined delay output (switchable bypass)
 
 	Control Mapping:
         Knob::Main: shared delay timing control (averaged with CVIn1 when patched)
         Knob::X: Second tap delay - offset from tap 1 (averaged with CVIn2 when patched)
-		Knob::Y: limiter volume
+                Knob::Y: saturation drive
         Switch: Up = split inputs/outputs (parallel taps); Center = shared mix
                 Momentary Down: toggles tape saturation on/off
 
@@ -77,55 +75,26 @@ struct OnePoleHP {
     void clear(){ lp.clear(); }
 };
 
-// ---------- soft clipper (tape-ish) ----------
+// ---------- sigmoid saturation ----------
 /**
- * @brief Lightweight tape-style saturator with gentle cubic soft clipping.
- *
- * The processor runs in the Q15 fixed-point domain. Drive boosts the input into
- * the non-linearity, makeup restores level afterwards, and a small bias allows
- * for asymmetry. Pre- and post-filters are kept but can be disabled by leaving
- * their coefficients at zero.
+ * @brief Simple sigmoid-based saturator with adjustable drive.
  */
+struct SigmoidSaturator {
+    // Drive in Q12 (4096 ≈ 1.0). Range expanded via knob mapping.
+    uint16_t driveQ12 = 4096;
 
-struct TapeSaturator {
-    // Controls (Q15): 32767 ≈ 1.0
-    uint16_t driveQ15   = 16384;  // ~0.5x to start; raise for more saturation
-    uint16_t makeupQ15  = 16384;  // bring level back after clipping
-    int16_t  biasQ15    = 1024;      // small DC bias for asymmetry (e.g., ±1024)
-
-    // Pre/post filters
-    OnePoleHP preHP;    // pre-emphasis (boost highs into nonlinearity)
-    OnePoleLP postLP;   // de-emphasis / anti-alias
-
-    // Process one sample (Q15 int16)
-    inline int16_t process(int16_t x){
-        // 1) pre-emphasis (subtle)
-        int16_t pre = x;
-        //int16_t pre = preHP.process(x);
-
-        // 2) add small bias for asymmetry
-        int32_t z = (int32_t)pre + (int32_t)biasQ15;
-        z = sat16(z);
-
-        // 3) apply drive (Q15 gain)
-        int16_t d = mul_q15((int16_t)z, (int16_t)driveQ15);
-
-        // 4) cubic soft clip in Q15: y = d - (d^3)/3
-        //    d2 = (d*d)>>15, d3 = (d2*d)>>15
-        int32_t d2 = ((int32_t)d * (int32_t)d) >> 15;
-        int32_t d3 = (d2 * d) >> 15;
-        int32_t y  = (int32_t)d - (d3 / 3);     // good integer approx of tanh-ish
-
-        // 5) makeup gain
-        y = ((y * (int32_t)makeupQ15) >> 15);
-
-        // 6) post lowpass to smooth HF crud
-        //int16_t out = postLP.process(sat16(y));
-        int16_t out = sat16(y);
-        return out;
+    inline int16_t process(int16_t x) const {
+        int32_t scaled = ((int32_t)x * (int32_t)driveQ12) >> 12;
+        scaled = sat12(scaled);
+        return SigSat((int16_t)scaled);
     }
 
-    void clear(){ preHP.clear(); postLP.clear(); }
+    void setDriveQ12(uint16_t drive){
+        if (drive < 256) drive = 256;
+        driveQ12 = drive;
+    }
+
+    void clear(){}
 };
 
 
@@ -154,88 +123,6 @@ static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord
     return sat12(result);
 }
 
-/**
- * @brief One-pole envelope follower plus fixed-ratio gain computer.
- *
- * The limiter approximates a fixed-ratio compressor by applying a smoothed peak
- * detector to the input and computing a gain value in the Q15 domain. The
- * entire inner loop is integer math so the expensive coefficient calculation is
- * performed only when the attack/release values change.
- */
-class FixedRatioLimiter {
-public:
-    // sampleRate: e.g., 48000
-    // attackMs/releaseMs: envelope times
-    // thresholdQ15: 0..32767 (e.g., 26214 ≈ 0.8 FS)
-    // ratio: 1=no compression, 4=4:1, 1000≈ limiter
-    FixedRatioLimiter(uint32_t sampleRate,
-                      float attackMs, float releaseMs,
-                      uint16_t thresholdQ15, uint16_t ratio)
-    : sr_(sampleRate), thr_(thresholdQ15), ratio_(ratio ? ratio : 1)
-    {
-        setTimes(attackMs, releaseMs);
-    }
-
-    // Change times later (computes Q15 coeffs once; floats not used in process())
-    void setTimes(float attackMs, float releaseMs){
-        atk_q15_ = timeToCoeffQ15(attackMs);
-        rel_q15_ = timeToCoeffQ15(releaseMs);
-    }
-
-    void setThresholdQ15(uint16_t thr){ thr_ = thr; }
-    void setRatio(uint16_t r){ ratio_ = (r ? r : 1); }
-
-    // Process one sample (int16_t Q15 audio)
-    inline int16_t process(int16_t x){
-        // 1) Peak envelope with attack/release smoothing (Q15 math)
-        uint16_t mag = (uint16_t)(x >= 0 ? x : (x == -32768 ? 32767 : -x)); // |x| in 0..32767
-        uint32_t diff;
-        if (mag > env_) {
-            diff = (uint32_t)mag - env_;
-            env_ += (uint32_t)((diff * atk_q15_) >> 15);
-        } else {
-            diff = (uint32_t)env_ - mag;
-            env_ -= (uint32_t)((diff * rel_q15_) >> 15);
-        }
-
-        // 2) Compute gain (Q15). If below threshold => unity
-        uint16_t gain_q15 = 32767;
-        if (env_ > thr_) {
-            // a = thr/env in Q15: ((thr<<15)/env)
-            uint16_t a = (uint16_t)(((uint32_t)thr_ << 15) / env_);
-            // Fixed-ratio law: out = thr + (env - thr)/ratio  => gain = out/env
-            // => gain = a + (1/ratio)*(1 - a)
-            uint16_t one_minus_a = (uint16_t)(32767 - a);
-            uint16_t term = (uint16_t)(one_minus_a / ratio_); // integer, cheap
-            gain_q15 = (uint16_t)(a + term);
-        }
-
-        // 3) Apply gain
-        int32_t y = ((int32_t)x * (int32_t)gain_q15) >> 15;
-        return sat16(y);
-    }     
-    // Optional: clear envelope
-    void reset(){ env_ = 0; }
-
-private:
-    // Convert time constant to per-sample smoothing coeff in Q15:
-    // coeff = 1 - exp(-1/(tau * sr))  (performed once, out of the DSP loop)
-    uint16_t timeToCoeffQ15(float ms){
-        if (ms <= 0.0f) return 32767; // immediate
-        float tau = ms / 1000.0f;
-        float c = 1.0f - std::exp(-1.0f / (tau * (float)sr_));
-        if (c < 0.0f) c = 0.0f; 
-        if (c > 0.9999695f) c = 0.9999695f; // clamp to <1
-        return (uint16_t)(c * 32767.0f + 0.5f);
-    }
-
-    uint32_t sr_;
-    uint16_t thr_{26214};    // ~0.8 FS by default
-    uint16_t ratio_{1000};   // ≈ limiter by default
-    uint16_t atk_q15_{1638}; // ~50 ms at 48 kHz default-ish
-    uint16_t rel_q15_{328};  // ~250 ms default-ish
-    uint16_t env_{0};        // envelope in Q15 (0..32767)
-};
 
 /**
  * @brief Delay line with click-free modulation.
@@ -459,9 +346,7 @@ class Vink : public ComputerCard
 public:
     Vink()
         : dl1_(kSampleRate, kMaxDelayMs),
-          dl2_(kSampleRate, kMaxDelayMs),
-          lim_(kSampleRate, 1.0f, 100.0f, 29491, 1000),
-          lim2_(kSampleRate, 1.0f, 100.0f, 29491, 1000)
+          dl2_(kSampleRate, kMaxDelayMs)
     {
         initialiseDelay(dl1_, msToFP16(100));
         initialiseDelay(dl2_, msToFP16(50));
@@ -567,26 +452,25 @@ public:
                     pulseState2_,
                     [this](bool v){ PulseOut2(v); LedOn(5, v); });
 
-        uint16_t thrQ15 = knobToQ15(KnobVal(Knob::Y));
-        lim_.setThresholdQ15(thrQ15);
-        lim2_.setThresholdQ15(thrQ15);
+        uint16_t driveQ12 = knobToDriveQ12(KnobVal(Knob::Y));
+        sat.setDriveQ12(driveQ12);
+        sat2.setDriveQ12(driveQ12);
 
-        auto applySaturation = [this](int16_t sample, TapeSaturator& s){
-            //return saturationEnabled_ ? s.process(sample) : sample;
-			return saturationEnabled_ ? SigSat(sample) : sample;
+        auto applySaturation = [this](int16_t sample, SigmoidSaturator& s){
+            return saturationEnabled_ ? s.process(sample) : sample;
         };
-		
+
 
         if (splitMode) {
-            int16_t out1 = sat12(lim_.process(applySaturation(delay1, sat)));
-            int16_t out2 = sat12(lim2_.process(applySaturation(delay2, sat2)));
+            int16_t out1 = sat12(applySaturation(delay1, sat));
+            int16_t out2 = sat12(applySaturation(delay2, sat2));
             AudioOut1(out1);
             AudioOut2(out2);
             LedBrightness(0, led_from_audio12(out1));
             LedBrightness(1, led_from_audio12(out2));
         } else {
             int16_t mix = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
-            int16_t outMono = sat12(lim_.process(applySaturation(mix, sat)));
+            int16_t outMono = sat12(applySaturation(mix, sat));
             AudioOut1(outMono);
             AudioOut2(outMono);
             LedBrightness(0, led_from_audio12(outMono));
@@ -609,13 +493,9 @@ public:
     }
 
 private:
-    static TapeSaturator makeSaturator(){
-        TapeSaturator s;
-        s.preHP.lp.a = 3000;
-        s.postLP.a   = 2000;
-        s.driveQ15   = 16000;
-        s.makeupQ15  = 16000;
-        s.biasQ15    = 128;
+    static SigmoidSaturator makeSaturator(){
+        SigmoidSaturator s;
+        s.setDriveQ12(4096);
         return s;
     }
 
@@ -630,12 +510,14 @@ private:
         return (uint32_t)value;
     }
 
-    static uint16_t knobToQ15(uint16_t knob){
-        return (uint16_t)(((uint32_t)knob * 32767u) / 4095u);
-    }
-
     static uint32_t knobToDelayFP16(uint16_t knob){
         return (uint32_t)(((uint64_t)knob * kMaxDelaySamplesFP16) / 4095u);
+    }
+
+    static uint16_t knobToDriveQ12(uint16_t knob){
+        uint32_t drive = 4096u + ((uint32_t)knob * 12288u) / 4095u; // ≈1x .. 4x
+        if (drive > 16384u) drive = 16384u;
+        return (uint16_t)drive;
     }
 
     static uint32_t averageWithCv(uint32_t knobTarget, int16_t cv){
@@ -646,10 +528,8 @@ private:
 
     SmoothDelay dl1_;
     SmoothDelay dl2_;
-    FixedRatioLimiter lim_;
-    TapeSaturator sat;
-    FixedRatioLimiter lim2_;
-    TapeSaturator sat2;
+    SigmoidSaturator sat;
+    SigmoidSaturator sat2;
     bool saturationEnabled_{true};
     uint32_t pulseCountdown1_{0};
     uint32_t pulseCountdown2_{0};
