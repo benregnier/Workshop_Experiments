@@ -17,9 +17,8 @@
  * Controls
  *  - `Knob::Main`   : shared delay time, averaged with `CVIn1`
  *  - `Knob::X`      : tap 2 offset from tap 1, averaged with `CVIn2`
- *  - `Knob::Y`      : saturation drive
- *  - `Switch::Up`   : split I/O; `Switch::Center` : shared mix
- *  - `Switch::Down` : momentary toggle of tape saturation
+ *  - `Knob::Y`      : crossfade dry ↔ saturated
+ *  - `Switch::Up`   : split I/O; `Switch::Center/Down` : shared mix
  *
  * I/O mapping
  *  - `AudioIn1/2` : summed if both patched
@@ -56,6 +55,17 @@ static inline uint16_t led_from_audio12(int16_t x){
     return static_cast<uint16_t>(std::clamp<int32_t>(v, 0, 4095));
 }
 
+static inline uint16_t knobToMixQ16(uint16_t knob){
+    return static_cast<uint16_t>(((uint32_t)knob << 16) / 4095u);
+}
+
+static inline int16_t mixDryWet(int16_t dry, int16_t wet, uint16_t mixQ16){
+    uint32_t wetMix = mixQ16;
+    uint32_t dryMix = 65535u - wetMix;
+    int32_t blended = ( (int64_t)dry * (int64_t)dryMix + (int64_t)wet * (int64_t)wetMix ) >> 16;
+    return sat12(blended);
+}
+
 static inline int16_t SigSat(int16_t x);
 
 
@@ -74,8 +84,6 @@ struct SigmoidSaturator {
     }
 
     void setDriveQ12(uint16_t drive){ driveQ12 = std::max<uint16_t>(drive, 256u); }
-
-    void clear(){}
 };
 
 /**
@@ -331,13 +339,6 @@ public:
     void ProcessSample() override
     {
         Switch sw = SwitchVal();
-        if (SwitchChanged() && sw == Switch::Down) {
-            saturationEnabled_ = !saturationEnabled_;
-            if (!saturationEnabled_) {
-                sat.clear();
-                sat2.clear();
-            }
-        }
         bool splitMode = (sw == Switch::Up);
 
         // 2 delay lines
@@ -417,25 +418,24 @@ public:
                     pulseState2_,
                     [this](bool v){ PulseOut2(v); LedOn(5, v); });
 
-        uint16_t driveQ12 = knobToDriveQ12(KnobVal(Knob::Y));
-        sat.setDriveQ12(driveQ12);
-        sat2.setDriveQ12(driveQ12);
-
-        auto applySaturation = [this](int16_t sample, SigmoidSaturator& s){
-            return saturationEnabled_ ? s.process(sample) : sample;
+        uint16_t mixQ16 = knobToMixQ16(KnobVal(Knob::Y));
+        auto applyCrossfade = [mixQ16](int16_t dry, int16_t wet){
+            return mixDryWet(dry, wet, mixQ16);
         };
 
-
         if (splitMode) {
-            int16_t out1 = sat12(applySaturation(delay1, sat));
-            int16_t out2 = sat12(applySaturation(delay2, sat2));
+            int16_t saturated1 = sat.process(delay1);
+            int16_t saturated2 = sat2.process(delay2);
+            int16_t out1 = applyCrossfade(delay1, saturated1);
+            int16_t out2 = applyCrossfade(delay2, saturated2);
             AudioOut1(out1);
             AudioOut2(out2);
             LedBrightness(0, led_from_audio12(out1));
             LedBrightness(1, led_from_audio12(out2));
         } else {
             int16_t mix = (int16_t)(((int32_t)delay1 + (int32_t)delay2) >> 1);
-            int16_t outMono = sat12(applySaturation(mix, sat));
+            int16_t saturated = sat.process(mix);
+            int16_t outMono = applyCrossfade(mix, saturated);
             AudioOut1(outMono);
             AudioOut2(outMono);
             LedBrightness(0, led_from_audio12(outMono));
@@ -479,12 +479,6 @@ private:
         return (uint32_t)(((uint64_t)knob * kMaxDelaySamplesFP16) / 4095u);
     }
 
-    static uint16_t knobToDriveQ12(uint16_t knob){
-        uint32_t drive = 4096u + ((uint32_t)knob * 12288u) / 4095u; // ≈1x .. 4x
-        if (drive > 16384u) drive = 16384u;
-        return (uint16_t)drive;
-    }
-
     static uint32_t averageWithCv(uint32_t knobTarget, int16_t cv){
         int64_t offset = ((int64_t)kDelayRangeSamplesFP16 * (int64_t)cv) / 2048;
         int64_t cvTarget = (int64_t)knobTarget + offset;
@@ -495,7 +489,6 @@ private:
     SmoothDelay dl2_;
     SigmoidSaturator sat;
     SigmoidSaturator sat2;
-    bool saturationEnabled_{true};
     uint32_t pulseCountdown1_{0};
     uint32_t pulseCountdown2_{0};
     uint32_t pulseHold1_{0};
