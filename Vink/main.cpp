@@ -51,36 +51,11 @@ static inline uint16_t led_from_audio12(int16_t x){
     if(v > 4095) v = 4095;
     return v;
 }
-static inline int16_t mul_q15(int16_t a, int16_t b){ return (int16_t)(((int32_t)a * (int32_t)b) >> 15); }
 
 static inline int16_t SigSat(int16_t x);
 
-// One-pole (state-space) lowpass: y += a*(x - y), a in Q15
-struct OnePoleLP {
-    int16_t y = 0;         // state in Q15
-    uint16_t a = 0;        // coeff Q15 (0..32767), ~cutoff control
-    inline int16_t process(int16_t x){
-        int16_t diff = (int16_t)(x - y);
-        y = (int16_t)(y + ((int32_t)diff * a >> 15));
-        return y;
-    }
-    void clear(){ y = 0; }
-};
 
-// Highpass via “x - lowpass(x)”
-struct OnePoleHP {
-    OnePoleLP lp;
-    inline int16_t process(int16_t x){
-        int16_t lo = lp.process(x);
-        return (int16_t)(x - lo);
-    }
-    void clear(){ lp.clear(); }
-};
-
-// ---------- sigmoid saturation ----------
-/**
- * @brief Simple sigmoid-based saturator with adjustable drive.
- */
+// ---------- sigmoid saturator ----------
 struct SigmoidSaturator {
     // Drive in Q12 (4096 ≈ 1.0). Range expanded via knob mapping.
     uint16_t driveQ12 = 4096;
@@ -99,16 +74,7 @@ struct SigmoidSaturator {
     void clear(){}
 };
 
-
-static inline int16_t RingMod(int16_t a, int16_t b)
-{
-    int32_t prod = (int32_t)a * (int32_t)b;   // range: ±(32768²)
-    prod >>= 15;                              // Q15 scaling back to ±32767
-    if (prod >  32767) prod =  32767;
-    if (prod < -32768) prod = -32768;
-    return (int16_t)prod;
-}
-
+// Sigmoid saturation function: x / (1 + |x|) approximated for 12-bit audio
 static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
 {
     int32_t ax = (x >= 0) ? x : -(int32_t)x;
@@ -126,13 +92,7 @@ static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord
 }
 
 
-/**
- * @brief Delay line with click-free modulation.
- *
- * Internally stores the delay time in 16.16 fixed-point samples and slews toward
- * a target value to avoid zippering. The buffer size is rounded up to the next
- * power of two so wrapping becomes a bitmask operation.
- */
+// ---------- smooth delay line ----------
 class SmoothDelay {
 public:
     // maxDelayMs: upper bound (e.g., 1000 = 1s)
@@ -247,14 +207,6 @@ private:
     bool initialised_;
 };
 
-/**
- * @brief Implementation of the Vink dual-delay feedback card.
- *
- * The class encapsulates the full signal flow for the instrument described at
- * the top of the file. It keeps the runtime hot path compact by offering small
- * helper utilities that encapsulate repeated tasks (delay computation,
- * saturation toggling, pulse generation, etc.).
- */
 class Vink : public ComputerCard
 {
     static constexpr uint32_t kSampleRate = 48000u;
@@ -358,8 +310,8 @@ public:
         PulseOut1(false);
         PulseOut2(false);
 
-        lfo1_.configure(0.412345f, 3.9700f, 3.0e-7f, 16384u); //0.412345f, 3.9935f, 2.0e-7f, 32768u
-        lfo2_.configure(0.762531f, 3.9500f, 4.0e-7f, 12384u); //0.762531f, 3.9855f, 3.0e-7f, 16384u
+        lfo1_.configure(0.412345f, 3.9935f, 2.0e-7f, 32768u); //
+        lfo2_.configure(0.762531f, 3.9855f, 3.0e-7f, 16384u); //
     }
 
     /**
