@@ -138,13 +138,15 @@ static inline int16_t RingMod(int16_t a, int16_t b)
     return (int16_t)prod;
 }
 
-static inline int16_6 SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
+static inline int16_t SigSat(int16_t x) // Thanks to Allsnop @ the serge discord! x/(1+abs(x))
 {
-	int16_t xabs = (x < 0) ? -x : x;  // |x|
+	int32_t xabs = (x < 0) ? -x : x;  // |x|
 	if (x < 0) {
 		xabs = x * -1;
 	}
-	int32_t xsat = (x / (1 + xabs)) << 11;
+    int32_t num = x * 2047;
+    int32_t denom = 1 + xabs;
+    int32_t xsat = num / denom;
 	return (int16_t)sat12(xsat);	
 }
 
