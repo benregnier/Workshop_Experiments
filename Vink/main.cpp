@@ -5,7 +5,7 @@
 
 /**
  * @file main.cpp
- * @brief Vink: dual delay loops with sigmoid saturation for Jaap Vink /
+ * @brief Vink: dual delay loops with saturation for Jaap Vink /
  * Roland Kayn style feedback patching.
  *
  * Reference performance: https://www.youtube.com/watch?v=X_Bcr_HS9XM
