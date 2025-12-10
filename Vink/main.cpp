@@ -192,6 +192,8 @@ public:
 
         // 3) Read with linear interpolation between base and base-1
         uint32_t base = (w_ - delayInt) & mask_;
+        bool wrapped = base < prev_base_;
+        prev_base_ = base;
         int32_t  x0   = buffer_[base];
         int32_t  x1   = buffer_[(base - 1) & mask_];
 
@@ -199,6 +201,21 @@ public:
         uint32_t f = delayFrac;
         int32_t y  = ( (x0 * (int32_t)(65536u - f)) + (x1 * (int32_t)f) ) >> 16;
         int16_t out = sat16(y);
+
+        // Fade the start of each tap loop to suppress single-sample discontinuities
+        // (e.g., with heavy feedback) without low-passing the whole path.
+        if (wrapped) {
+            edge_fade_ = kEdgeFadeLen;
+        }
+        if (edge_fade_ > 0) {
+            uint32_t weightPrev = edge_fade_;
+            uint32_t weightNew = kEdgeFadeLen - edge_fade_;
+            int32_t blended = ( (int32_t)last_out_ * (int32_t)weightPrev
+                              + (int32_t)out       * (int32_t)weightNew );
+            out = sat16( blended / (int32_t)kEdgeFadeLen );
+            edge_fade_--;
+        }
+        last_out_ = out;
 
         // 4) Write current input and advance
         buffer_[w_] = in;
@@ -218,6 +235,10 @@ private:
     uint32_t mask_;
     int16_t* buffer_;
     uint32_t w_;
+    static constexpr uint8_t kEdgeFadeLen = 4; // samples to crossfade after wrap
+    uint32_t prev_base_{0};
+    uint8_t  edge_fade_{0};
+    int16_t  last_out_{0};
 
     // Delay (16.16 samples)
     uint32_t current_fp16_;
