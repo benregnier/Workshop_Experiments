@@ -1,5 +1,5 @@
 // Mellotron emulator
-// Load in your own sounds! [sample spec here] include on the card at load.
+// Load in your own sounds! Will implement the "sample upload" html example
 // - Main knob controls tone/brightness
 // - Two channels
 // - Audio In: amplitude. values over 5 volts increase tone/brightness (aftertouch)
