@@ -4,6 +4,6 @@
 // - Two channels
 // - Audio In: amplitude
 // - CV In: pitch
-// - Trigger in: TBD
+// - Pulse in: If patched, acts as gate 
 // - X and Y are vibrato and tremolo
 // - Switch up or momentary: drone mode
