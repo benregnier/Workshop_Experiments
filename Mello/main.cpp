@@ -59,10 +59,10 @@ struct SampleBank {
 };
 
 struct Voice {
-    float pos = 0.0f;
-    float rate = 1.0f;
-    float env = 0.0f;
-    float lp = 0.0f;
+    uint32_t pos = 0;
+    uint32_t rate = 1u << 16; // Q16 phase increment
+    int32_t env = 0;          // Q15 envelope
+    int32_t lp = 0;           // low-pass accumulator
     int sampleIndex = 0;
 };
 
@@ -91,20 +91,37 @@ private:
     Voice voices_[2]{};
     bool gate_[2] = {true, true};
     int sampleIndex_[2] = {0, 1};
-    float tone_ = 0.5f;
+    int32_t toneQ15_ = 16384; // Q15 tone value
 
-    static constexpr float kEnvSlew = 0.0008f; // ~60 ms to settle
-    static constexpr float kToneBase = 0.004f;
+    static constexpr int32_t kEnvSlewQ15 = 26; // ~60 ms to settle (0.0008 * 2^15)
+    static constexpr int32_t kToneBaseQ15 = 131; // 0.004 * 2^15
+    static constexpr int32_t kToneScaleQ15 = 983; // 0.03 * 2^15
+    static constexpr int32_t kBrightBaseQ15 = 16384; // 0.5 * 2^15
+    static constexpr int32_t kBrightScaleQ15 = 19661; // 0.6 * 2^15
+    static constexpr uint32_t kPhaseMask = (SampleBank::kSampleLength << 16) - 1;
+
+    static constexpr std::array<uint32_t, 256> kExp2Table = [] {
+        std::array<uint32_t, 256> lut{};
+        for (int i = 0; i < 256; ++i) {
+            double val = std::pow(2.0, static_cast<double>(i) / 256.0);
+            lut[i] = static_cast<uint32_t>(val * static_cast<double>(1u << 16) + 0.5);
+        }
+        return lut;
+    }();
 
     void updateControls() {
-        tone_ = static_cast<float>(KnobVal(Knob::Main)) / 4095.0f;
+        uint16_t knob = KnobVal(Knob::Main);
+        toneQ15_ = static_cast<int32_t>((static_cast<uint32_t>(knob) * 32768u + 2047u) / 4095u);
 
         // Aftertouch from AudioIn1: values over ~5 V (~1300 in 12-bit) boost tone.
         int16_t aftertouchRaw = AudioIn1();
         int16_t afterAbs = aftertouchRaw >= 0 ? aftertouchRaw : static_cast<int16_t>(-aftertouchRaw);
         if (afterAbs > 1300) {
-            float extra = static_cast<float>(afterAbs - 1300) / 2047.0f;
-            tone_ = std::min(1.0f, tone_ + extra * 0.4f);
+            int32_t extraRaw = afterAbs - 1300;
+            int32_t extraScaled = (static_cast<int32_t>(extraRaw) * 32768) / 2047;
+            int32_t extra = (static_cast<int64_t>(extraScaled) * 13107 + 16384) >> 15; // *0.4
+            toneQ15_ += extra;
+            if (toneQ15_ > 32768) toneQ15_ = 32768;
         }
 
         sampleIndex_[0] = selectorToIndex(KnobVal(Knob::X));
@@ -127,10 +144,24 @@ private:
     void updatePitch(int ch) {
         int16_t cv = (ch == 0) ? CVIn1() : CVIn2();
         // ADC range maps roughly ±2048 to ±8 V, so ~256 counts per volt.
-        float volts = static_cast<float>(cv) / 256.0f;
-        // 1V/octave scaling
-        float ratio = std::pow(2.0f, volts);
-        voices_[ch].rate = ratio;
+        int32_t volts = cv / 256;
+        int32_t remainder = cv % 256;
+        if (remainder < 0) {
+            remainder += 256;
+            --volts;
+        }
+
+        uint32_t rate = kExp2Table[static_cast<uint8_t>(remainder)];
+        if (volts >= 0) {
+            if (volts > 8) volts = 8;
+            rate <<= volts;
+        } else {
+            int32_t shift = -volts;
+            if (shift > 8) shift = 8;
+            rate >>= shift;
+        }
+
+        voices_[ch].rate = rate;
         voices_[ch].sampleIndex = sampleIndex_[ch];
     }
 
@@ -139,30 +170,28 @@ private:
         const auto &table = samples_.bank[v.sampleIndex];
 
         // Linear interpolation
-        int32_t idx = static_cast<int32_t>(v.pos);
-        float frac = v.pos - static_cast<float>(idx);
-        int32_t idxNext = (idx + 1) & (SampleBank::kSampleLength - 1);
-        float a = static_cast<float>(table[idx]);
-        float b = static_cast<float>(table[idxNext]);
-        float sample = a + (b - a) * frac;
+        uint32_t idx = (v.pos >> 16) & (SampleBank::kSampleLength - 1);
+        uint32_t frac = v.pos & 0xFFFF;
+        int32_t a = table[idx];
+        int32_t b = table[(idx + 1) & (SampleBank::kSampleLength - 1)];
+        int32_t sample = a + static_cast<int32_t>((static_cast<int64_t>(b - a) * frac) >> 16);
 
         // Integrator for dark/bright balance
-        float toneCoef = kToneBase + tone_ * 0.03f;
-        v.lp += toneCoef * (sample - v.lp);
-        float bright = sample - v.lp;
-        float shaped = v.lp + bright * (0.5f + 0.6f * tone_);
+        int32_t toneCoef = kToneBaseQ15 + static_cast<int32_t>((static_cast<int64_t>(kToneScaleQ15) * toneQ15_) >> 15);
+        v.lp += static_cast<int32_t>((static_cast<int64_t>(toneCoef) * (sample - v.lp)) >> 15);
+        int32_t bright = sample - v.lp;
+        int32_t brightGain = kBrightBaseQ15 + static_cast<int32_t>((static_cast<int64_t>(kBrightScaleQ15) * toneQ15_) >> 15);
+        int32_t shaped = v.lp + static_cast<int32_t>((static_cast<int64_t>(bright) * brightGain) >> 15);
 
         // Envelope
-        float target = gate_[ch] ? 1.0f : 0.0f;
-        v.env += (target - v.env) * kEnvSlew;
-        float out = shaped * v.env;
+        int32_t target = gate_[ch] ? 32768 : 0;
+        v.env += static_cast<int32_t>((static_cast<int64_t>(target - v.env) * kEnvSlewQ15) >> 15);
+        int32_t out = static_cast<int32_t>((static_cast<int64_t>(shaped) * v.env) >> 15);
 
         // Advance phase
-        v.pos += v.rate;
-        while (v.pos >= SampleBank::kSampleLength) v.pos -= SampleBank::kSampleLength;
-        while (v.pos < 0.0f) v.pos += SampleBank::kSampleLength;
+        v.pos = (v.pos + v.rate) & kPhaseMask;
 
-        return sat12(static_cast<int32_t>(out));
+        return sat12(out);
     }
 };
 
