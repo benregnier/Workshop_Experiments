@@ -50,6 +50,8 @@ add_example(Vink)
 
 add_example(ESP)
 
+add_example(Cypress)
+
 add_example(Mello)
 # add_example(midi_device)
 # target_link_libraries(midi_device pico_multicore tinyusb_device tinyusb_board )
