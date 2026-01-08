@@ -1,11 +1,13 @@
 #include "ComputerCard.h"
 #include <cstdint>
+#include <limits>
 
 // Cypress: Pulse train / FOF synthesis
 //
 // - Main knob controls pulse frequency (summed with AudioIn2 1V/oct)
-// - X knob + CV1 control pulse rise (CV1 patched: knob = attenuator)
-// - Y knob + CV2 control pulse fall (CV2 patched: knob = attenuator)
+// - X knob + CV1 control pulse width (CV1 patched: knob = attenuator)
+// - Y knob + CV2 control pulse tilt (rise/fall ratio)
+// - Switch up: constant-time width; switch middle: constant duty cycle
 // - AudioIn1 provides excitation for FOF; if unpatched, a static value is used
 
 namespace {
@@ -13,11 +15,13 @@ constexpr int32_t kSampleRate = 48000;
 constexpr int32_t kEnvMax = 32768; // Q15
 constexpr int16_t kStaticSource = 1800;
 constexpr int32_t kRiseMinSamples = 4;
-constexpr int32_t kRiseMaxSamples = 2400; // ~50 ms
 constexpr int32_t kFallMinSamples = 4;
-constexpr int32_t kFallMaxSamples = 3600; // ~75 ms
+constexpr int32_t kWidthMinSamples = kRiseMinSamples + kFallMinSamples;
+constexpr int32_t kWidthMaxSamples = 6000; // ~125 ms
 constexpr int32_t kBaseFreqHz = 20;       // 0 V base frequency
 constexpr int32_t kMaxOctaveShift = 8;
+constexpr int32_t kDutyMinQ15 = 1638;   // ~5%
+constexpr int32_t kDutyMaxQ15 = 31130;  // ~95%
 
 static inline int16_t sat12(int32_t x) {
     if (x > 2047) return 2047;
@@ -27,7 +31,7 @@ static inline int16_t sat12(int32_t x) {
 
 constexpr uint32_t kBasePhaseInc = static_cast<uint32_t>((static_cast<uint64_t>(kBaseFreqHz) << 32) / kSampleRate);
 
-static constexpr uint32_t kExp2Table[] = {
+static constexpr uint32_t kExp2Table[256] = {
     65536, 65714, 65893, 66073, 66253, 66435, 66617, 66800, 66984, 67168, 67354, 67540, 67727, 67914, 68103, 68292,
     68482, 68673, 68865, 69058, 69252, 69446, 69641, 69838, 70034, 70232, 70431, 70630, 70831, 71032, 71234, 71437,
     71641, 71846, 72051, 72258, 72465, 72674, 72883, 73093, 73303, 73515, 73728, 73941, 74155, 74370, 74586, 74803,
@@ -92,8 +96,8 @@ public:
         AudioOut2(out);
 
         LedBrightness(0, KnobVal(Knob::Main));
-        LedBrightness(2, riseControl_);
-        LedBrightness(4, fallControl_);
+        LedBrightness(2, widthControl_);
+        LedBrightness(4, tiltControl_);
     }
 
 private:
@@ -107,30 +111,39 @@ private:
     Stage stage_ = Stage::Idle;
 
     bool inputConnected_ = false;
-    uint16_t riseControl_ = 0;
-    uint16_t fallControl_ = 0;
+    uint16_t widthControl_ = 0;
+    uint16_t tiltControl_ = 0;
 
     void updateControls() {
         inputConnected_ = Connected(Input::Audio1);
 
-        uint16_t knobRise = KnobVal(Knob::X);
-        uint16_t knobFall = KnobVal(Knob::Y);
+        uint16_t knobWidth = KnobVal(Knob::X);
+        uint16_t knobTilt = KnobVal(Knob::Y);
 
-        riseControl_ = Connected(Input::CV1)
-            ? static_cast<uint16_t>((static_cast<uint32_t>(knobRise) * static_cast<uint32_t>(CVIn1() + 2048)) >> 12)
-            : knobRise;
+        widthControl_ = Connected(Input::CV1)
+            ? static_cast<uint16_t>((static_cast<uint32_t>(knobWidth) * static_cast<uint32_t>(CVIn1() + 2048)) >> 12)
+            : knobWidth;
 
-        fallControl_ = Connected(Input::CV2)
-            ? static_cast<uint16_t>((static_cast<uint32_t>(knobFall) * static_cast<uint32_t>(CVIn2() + 2048)) >> 12)
-            : knobFall;
+        tiltControl_ = Connected(Input::CV2)
+            ? static_cast<uint16_t>((static_cast<uint32_t>(knobTilt) * static_cast<uint32_t>(CVIn2() + 2048)) >> 12)
+            : knobTilt;
 
-        int32_t riseSamples = mapControl(riseControl_, kRiseMinSamples, kRiseMaxSamples);
-        int32_t fallSamples = mapControl(fallControl_, kFallMinSamples, kFallMaxSamples);
+        phaseInc_ = computePhaseInc();
+        int32_t widthSamples = computeWidthSamples();
+        int32_t riseMaxSamples = widthSamples - kFallMinSamples;
+        if (riseMaxSamples < kRiseMinSamples) {
+            riseMaxSamples = kRiseMinSamples;
+        }
+
+        int32_t riseSamples = mapControl(tiltControl_, kRiseMinSamples, riseMaxSamples);
+        int32_t fallSamples = widthSamples - riseSamples;
+        if (fallSamples < kFallMinSamples) {
+            fallSamples = kFallMinSamples;
+            riseSamples = widthSamples - fallSamples;
+        }
 
         riseStep_ = (riseSamples > 0) ? (kEnvMax + riseSamples - 1) / riseSamples : kEnvMax;
         fallStep_ = (fallSamples > 0) ? (kEnvMax + fallSamples - 1) / fallSamples : kEnvMax;
-
-        phaseInc_ = computePhaseInc();
     }
 
     static int32_t mapControl(uint16_t control, int32_t minVal, int32_t maxVal) {
@@ -138,7 +151,31 @@ private:
         return minVal + static_cast<int32_t>((static_cast<int64_t>(span) * control + 2047) / 4095);
     }
 
-    uint32_t computePhaseInc() {
+    int32_t computeWidthSamples() const {
+        Switch sw = SwitchVal();
+        bool dutyCycleMode = (sw == Switch::Middle);
+        int32_t widthSamples = kWidthMinSamples;
+
+        if (dutyCycleMode) {
+            uint64_t periodSamples = (phaseInc_ > 0) ? ((1ull << 32) / phaseInc_) : 0;
+            int32_t dutyQ15 = kDutyMinQ15
+                + static_cast<int32_t>((static_cast<int64_t>(kDutyMaxQ15 - kDutyMinQ15) * widthControl_ + 2047) / 4095);
+            uint64_t computedWidth = (periodSamples * static_cast<uint32_t>(dutyQ15)) >> 15;
+            if (computedWidth > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+                computedWidth = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+            }
+            widthSamples = static_cast<int32_t>(computedWidth);
+        } else {
+            widthSamples = mapControl(widthControl_, kWidthMinSamples, kWidthMaxSamples);
+        }
+
+        if (widthSamples < kWidthMinSamples) {
+            widthSamples = kWidthMinSamples;
+        }
+        return widthSamples;
+    }
+
+    uint32_t computePhaseInc() const {
         int32_t knobCv = static_cast<int32_t>((static_cast<uint32_t>(KnobVal(Knob::Main)) * 2048u + 2047u) / 4095u);
         int32_t audioCv = Connected(Input::Audio2) ? static_cast<int32_t>(AudioIn2()) : 0;
         int32_t pitchCv = knobCv + audioCv;
