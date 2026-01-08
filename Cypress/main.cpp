@@ -27,7 +27,7 @@ static inline int16_t sat12(int32_t x) {
 
 constexpr uint32_t kBasePhaseInc = static_cast<uint32_t>((static_cast<uint64_t>(kBaseFreqHz) << 32) / kSampleRate);
 
-static constexpr uint32_t kExp2Table[256] = {
+static constexpr uint32_t kExp2Table[] = {
     65536, 65714, 65893, 66073, 66253, 66435, 66617, 66800, 66984, 67168, 67354, 67540, 67727, 67914, 68103, 68292,
     68482, 68673, 68865, 69058, 69252, 69446, 69641, 69838, 70034, 70232, 70431, 70630, 70831, 71032, 71234, 71437,
     71641, 71846, 72051, 72258, 72465, 72674, 72883, 73093, 73303, 73515, 73728, 73941, 74155, 74370, 74586, 74803,
@@ -138,7 +138,7 @@ private:
         return minVal + static_cast<int32_t>((static_cast<int64_t>(span) * control + 2047) / 4095);
     }
 
-    uint32_t computePhaseInc() const {
+    uint32_t computePhaseInc() {
         int32_t knobCv = static_cast<int32_t>((static_cast<uint32_t>(KnobVal(Knob::Main)) * 2048u + 2047u) / 4095u);
         int32_t audioCv = Connected(Input::Audio2) ? static_cast<int32_t>(AudioIn2()) : 0;
         int32_t pitchCv = knobCv + audioCv;
