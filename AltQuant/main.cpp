@@ -47,10 +47,10 @@ public:
 	    int32_t qin2 = CVIn2();
 	
 	    QuantizedNote q1 = Quantize_12v(qin1);
-		QuantizedNote q1 = Quantize_12v(qin2);
+		QuantizedNote q2 = Quantize_12v(qin2);
 
-		int32_t cm1mv = q1.octave * 1000 + log2_note[q1.note];
-		int32_t cm2mv = q2.octave * 1000 + log2_note[q2.note];
+		int32_t cv1mv = q1.octave * 1000 + log2_note[q1.note];
+		int32_t cv2mv = q2.octave * 1000 + log2_note[q2.note];
     
 		// Output desired voltages on CV out
 		bool cv1limited = CVOut1Millivolts(cv1mv);
@@ -73,4 +73,3 @@ int main()
 
 	aq.Run();
 }
-
