@@ -28,6 +28,7 @@ constexpr int32_t kSineTableBits = 8;
 constexpr int32_t kSineTableSize = 1 << kSineTableBits;
 constexpr int32_t kSineTableMask = kSineTableSize - 1;
 constexpr float kTwoPi = 6.28318530718f;
+constexpr float kPi = 3.14159265359f;
 
 static const std::array<int16_t, kSineTableSize> kSineTable = [] {
     std::array<int16_t, kSineTableSize> table{};
@@ -93,11 +94,11 @@ public:
         }
 
         int32_t pulseShapeQ15 = 0;
-        if (useSinePulse_ && !inputConnected_) {
+        if (useSinePulse_) {
             if (sinePos_ < widthSamples_) {
-                uint32_t idx = sinePhase_ >> (32 - kSineTableBits);
-                pulseShapeQ15 = kSineTable[idx & kSineTableMask];
-                sinePhase_ += sinePhaseInc_;
+                int32_t baseWave = computeBaseWaveQ15(sinePos_, widthSamples_);
+                int32_t envelope = computeEnvelopeQ15(sinePos_, widthSamples_);
+                pulseShapeQ15 = static_cast<int32_t>((static_cast<int64_t>(baseWave) * envelope) >> 15);
                 ++sinePos_;
             }
         } else {
@@ -117,7 +118,7 @@ public:
             pulseShapeQ15 = env_;
         }
 
-        int16_t source = inputConnected_ ? AudioIn1() : kStaticSource;
+        int16_t source = useSinePulse_ ? kStaticSource : (inputConnected_ ? AudioIn1() : kStaticSource);
         int32_t shaped = static_cast<int32_t>((static_cast<int64_t>(source) * pulseShapeQ15) >> 15);
         int16_t out = sat12(shaped);
 
@@ -131,6 +132,8 @@ public:
 
 private:
     enum class Stage { Idle, Rise, Fall };
+    enum class CycleMode { Single, Double, Triple, Quadruple, Sinc };
+    enum class EnvelopeMode { Rect, Triangle, Gaussian, ExpDecay, ExpRise };
 
     uint32_t phase_ = 0;
     uint32_t phaseInc_ = kBasePhaseInc;
@@ -147,10 +150,12 @@ private:
     int32_t sinePos_ = 0;
     uint32_t sinePhase_ = 0;
     uint32_t sinePhaseInc_ = 0;
+    CycleMode cycleMode_ = CycleMode::Single;
+    EnvelopeMode envelopeMode_ = EnvelopeMode::Rect;
 
     void updateControls() {
         inputConnected_ = Connected(Input::Audio1);
-        if (!inputConnected_ && SwitchChanged() && SwitchVal() == Switch::Down) {
+        if (SwitchChanged() && SwitchVal() == Switch::Down) {
             useSinePulse_ = !useSinePulse_;
         }
 
@@ -166,7 +171,13 @@ private:
             : knobTilt;
 
         phaseInc_ = computePhaseInc();
-        widthSamples_ = computeWidthSamples();
+        if (useSinePulse_) {
+            widthSamples_ = computeAltWidthSamples();
+            cycleMode_ = static_cast<CycleMode>(mapControlIndex(widthControl_, 5));
+            envelopeMode_ = static_cast<EnvelopeMode>(mapControlIndex(tiltControl_, 5));
+        } else {
+            widthSamples_ = computeWidthSamples();
+        }
         int32_t riseMaxSamples = widthSamples_ - kFallMinSamples;
         if (riseMaxSamples < kRiseMinSamples) {
             riseMaxSamples = kRiseMinSamples;
@@ -182,11 +193,91 @@ private:
         riseStep_ = (riseSamples > 0) ? (kEnvMax + riseSamples - 1) / riseSamples : kEnvMax;
         fallStep_ = (fallSamples > 0) ? (kEnvMax + fallSamples - 1) / fallSamples : kEnvMax;
         sinePhaseInc_ = (widthSamples_ > 0) ? static_cast<uint32_t>((1ull << 32) / widthSamples_) : 0;
+        if (useSinePulse_ && cycleMode_ != CycleMode::Sinc) {
+            uint32_t cycles = static_cast<uint32_t>(static_cast<int32_t>(cycleMode_) + 1);
+            sinePhaseInc_ = static_cast<uint32_t>((static_cast<uint64_t>(sinePhaseInc_) * cycles));
+        }
     }
 
     static int32_t mapControl(uint16_t control, int32_t minVal, int32_t maxVal) {
         int32_t span = maxVal - minVal;
         return minVal + static_cast<int32_t>((static_cast<int64_t>(span) * control + 2047) / 4095);
+    }
+
+    static int32_t mapControlIndex(uint16_t control, int32_t count) {
+        if (count <= 1) return 0;
+        return static_cast<int32_t>((static_cast<uint32_t>(control) * static_cast<uint32_t>(count)) >> 12);
+    }
+
+    int32_t computeAltWidthSamples() {
+        uint64_t periodSamples = (phaseInc_ > 0) ? ((1ull << 32) / phaseInc_) : 0;
+        int32_t widthSamples = static_cast<int32_t>(periodSamples / 2);
+        if (widthSamples < kWidthMinSamples) {
+            widthSamples = kWidthMinSamples;
+        }
+        if (widthSamples > kWidthMaxSamples) {
+            widthSamples = kWidthMaxSamples;
+        }
+        if (periodSamples > 0 && static_cast<uint64_t>(widthSamples) > periodSamples) {
+            widthSamples = static_cast<int32_t>(periodSamples);
+        }
+        if (widthSamples < kWidthMinSamples) {
+            widthSamples = kWidthMinSamples;
+        }
+        return widthSamples;
+    }
+
+    int32_t computeEnvelopeQ15(int32_t pos, int32_t length) const {
+        if (length <= 1) {
+            return kEnvMax;
+        }
+        float t = static_cast<float>(pos) / static_cast<float>(length - 1);
+        float value = 1.0f;
+        switch (envelopeMode_) {
+            case EnvelopeMode::Rect:
+                value = 1.0f;
+                break;
+            case EnvelopeMode::Triangle:
+                value = (t <= 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+                break;
+            case EnvelopeMode::Gaussian: {
+                constexpr float sigma = 0.18f;
+                float x = (t - 0.5f) / sigma;
+                value = std::exp(-0.5f * x * x);
+                break;
+            }
+            case EnvelopeMode::ExpDecay: {
+                constexpr float alpha = 4.0f;
+                value = std::exp(-alpha * t);
+                break;
+            }
+            case EnvelopeMode::ExpRise: {
+                constexpr float alpha = 4.0f;
+                value = std::exp(-alpha * (1.0f - t));
+                break;
+            }
+        }
+        if (value < 0.0f) value = 0.0f;
+        if (value > 1.0f) value = 1.0f;
+        return static_cast<int32_t>(value * static_cast<float>(kEnvMax));
+    }
+
+    int32_t computeBaseWaveQ15(int32_t pos, int32_t length) {
+        if (length <= 0) {
+            return 0;
+        }
+        if (cycleMode_ == CycleMode::Sinc) {
+            float center = 0.5f * static_cast<float>(length - 1);
+            float x = (center > 0.0f)
+                ? ((static_cast<float>(pos) - center) / center) * kPi
+                : 0.0f;
+            float value = (std::abs(x) < 1e-6f) ? 1.0f : std::sin(x) / x;
+            return static_cast<int32_t>(value * 32767.0f);
+        }
+
+        uint32_t idx = sinePhase_ >> (32 - kSineTableBits);
+        sinePhase_ += sinePhaseInc_;
+        return kSineTable[idx & kSineTableMask];
     }
 
     int32_t computeWidthSamples() {
