@@ -1,4 +1,6 @@
 #include "ComputerCard.h"
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
@@ -22,6 +24,20 @@ constexpr int32_t kBaseFreqHz = 20;       // 0 V base frequency
 constexpr int32_t kMaxOctaveShift = 8;
 constexpr int32_t kDutyMinQ15 = 1638;   // ~5%
 constexpr int32_t kDutyMaxQ15 = 31130;  // ~95%
+constexpr int32_t kSineTableBits = 8;
+constexpr int32_t kSineTableSize = 1 << kSineTableBits;
+constexpr int32_t kSineTableMask = kSineTableSize - 1;
+constexpr float kTwoPi = 6.28318530718f;
+
+static constexpr std::array<int16_t, kSineTableSize> kSineTable = [] {
+    std::array<int16_t, kSineTableSize> table{};
+    for (int i = 0; i < kSineTableSize; ++i) {
+        float phase = static_cast<float>(i) / static_cast<float>(kSineTableSize);
+        float value = std::sin(kTwoPi * phase);
+        table[i] = static_cast<int16_t>(value * 32767.0f);
+    }
+    return table;
+}();
 
 static inline int16_t sat12(int32_t x) {
     if (x > 2047) return 2047;
@@ -72,24 +88,37 @@ public:
         if (newPulse) {
             env_ = 0;
             stage_ = Stage::Rise;
+            sinePos_ = 0;
+            sinePhase_ = 0;
         }
 
-        if (stage_ == Stage::Rise) {
-            env_ += riseStep_;
-            if (env_ >= kEnvMax) {
-                env_ = kEnvMax;
-                stage_ = Stage::Fall;
+        int32_t pulseShapeQ15 = 0;
+        if (useSinePulse_ && !inputConnected_) {
+            if (sinePos_ < widthSamples_) {
+                uint32_t idx = sinePhase_ >> (32 - kSineTableBits);
+                pulseShapeQ15 = kSineTable[idx & kSineTableMask];
+                sinePhase_ += sinePhaseInc_;
+                ++sinePos_;
             }
-        } else if (stage_ == Stage::Fall) {
-            env_ -= fallStep_;
-            if (env_ <= 0) {
-                env_ = 0;
-                stage_ = Stage::Idle;
+        } else {
+            if (stage_ == Stage::Rise) {
+                env_ += riseStep_;
+                if (env_ >= kEnvMax) {
+                    env_ = kEnvMax;
+                    stage_ = Stage::Fall;
+                }
+            } else if (stage_ == Stage::Fall) {
+                env_ -= fallStep_;
+                if (env_ <= 0) {
+                    env_ = 0;
+                    stage_ = Stage::Idle;
+                }
             }
+            pulseShapeQ15 = env_;
         }
 
         int16_t source = inputConnected_ ? AudioIn1() : kStaticSource;
-        int32_t shaped = static_cast<int32_t>((static_cast<int64_t>(source) * env_) >> 15);
+        int32_t shaped = static_cast<int32_t>((static_cast<int64_t>(source) * pulseShapeQ15) >> 15);
         int16_t out = sat12(shaped);
 
         AudioOut1(out);
@@ -113,9 +142,17 @@ private:
     bool inputConnected_ = false;
     uint16_t widthControl_ = 0;
     uint16_t tiltControl_ = 0;
+    int32_t widthSamples_ = kWidthMinSamples;
+    bool useSinePulse_ = false;
+    int32_t sinePos_ = 0;
+    uint32_t sinePhase_ = 0;
+    uint32_t sinePhaseInc_ = 0;
 
     void updateControls() {
         inputConnected_ = Connected(Input::Audio1);
+        if (!inputConnected_ && SwitchChanged() && SwitchVal() == Switch::Down) {
+            useSinePulse_ = !useSinePulse_;
+        }
 
         uint16_t knobWidth = KnobVal(Knob::X);
         uint16_t knobTilt = KnobVal(Knob::Y);
@@ -129,21 +166,22 @@ private:
             : knobTilt;
 
         phaseInc_ = computePhaseInc();
-        int32_t widthSamples = computeWidthSamples();
-        int32_t riseMaxSamples = widthSamples - kFallMinSamples;
+        widthSamples_ = computeWidthSamples();
+        int32_t riseMaxSamples = widthSamples_ - kFallMinSamples;
         if (riseMaxSamples < kRiseMinSamples) {
             riseMaxSamples = kRiseMinSamples;
         }
 
         int32_t riseSamples = mapControl(tiltControl_, kRiseMinSamples, riseMaxSamples);
-        int32_t fallSamples = widthSamples - riseSamples;
+        int32_t fallSamples = widthSamples_ - riseSamples;
         if (fallSamples < kFallMinSamples) {
             fallSamples = kFallMinSamples;
-            riseSamples = widthSamples - fallSamples;
+            riseSamples = widthSamples_ - fallSamples;
         }
 
         riseStep_ = (riseSamples > 0) ? (kEnvMax + riseSamples - 1) / riseSamples : kEnvMax;
         fallStep_ = (fallSamples > 0) ? (kEnvMax + fallSamples - 1) / fallSamples : kEnvMax;
+        sinePhaseInc_ = (widthSamples_ > 0) ? static_cast<uint32_t>((1ull << 32) / widthSamples_) : 0;
     }
 
     static int32_t mapControl(uint16_t control, int32_t minVal, int32_t maxVal) {
