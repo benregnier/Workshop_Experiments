@@ -53,6 +53,8 @@ add_example(ESP)
 add_example(Cypress)
 
 add_example(Mello)
+
+add_example(AltQuant)
 # add_example(midi_device)
 # target_link_libraries(midi_device pico_multicore tinyusb_device tinyusb_board )
 # target_sources(midi_device PUBLIC ${CMAKE_CURRENT_LIST_DIR}/examples/midi_device/usb_descriptors.c)

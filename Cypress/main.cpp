@@ -19,7 +19,7 @@ constexpr int16_t kStaticSource = 1800;
 constexpr int32_t kRiseMinSamples = 4;
 constexpr int32_t kFallMinSamples = 4;
 constexpr int32_t kWidthMinSamples = kRiseMinSamples + kFallMinSamples;
-constexpr int32_t kWidthMaxSamples = 6000; // ~125 ms
+constexpr int32_t kWidthMaxSamples = 1024; // ~21ms at 48kHz
 constexpr int32_t kBaseFreqHz = 20;       // 0 V base frequency
 constexpr int32_t kMaxOctaveShift = 8;
 constexpr int32_t kDutyMinQ15 = 1638;   // ~5%
@@ -29,7 +29,7 @@ constexpr int32_t kSineTableSize = 1 << kSineTableBits;
 constexpr int32_t kSineTableMask = kSineTableSize - 1;
 constexpr float kTwoPi = 6.28318530718f;
 
-static constexpr std::array<int16_t, kSineTableSize> kSineTable = [] {
+static const std::array<int16_t, kSineTableSize> kSineTable = [] {
     std::array<int16_t, kSineTableSize> table{};
     for (int i = 0; i < kSineTableSize; ++i) {
         float phase = static_cast<float>(i) / static_cast<float>(kSineTableSize);
