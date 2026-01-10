@@ -93,7 +93,7 @@ public:
         }
 
         int32_t pulseShapeQ15 = 0;
-        if (useSinePulse_ && !inputConnected_) {
+        if (useSinePulse_) {
             if (sinePos_ < widthSamples_) {
                 uint32_t idx = sinePhase_ >> (32 - kSineTableBits);
                 pulseShapeQ15 = kSineTable[idx & kSineTableMask];
@@ -150,7 +150,7 @@ private:
 
     void updateControls() {
         inputConnected_ = Connected(Input::Audio1);
-        if (!inputConnected_ && SwitchChanged() && SwitchVal() == Switch::Down) {
+        if (SwitchChanged() && SwitchVal() == Switch::Down) {
             useSinePulse_ = !useSinePulse_;
         }
 

@@ -56,8 +56,8 @@ add_example(Mello)
 
 add_example(AltQuant)
 # add_example(midi_device)
-# target_link_libraries(midi_device pico_multicore tinyusb_device tinyusb_board )
-# target_sources(midi_device PUBLIC ${CMAKE_CURRENT_LIST_DIR}/examples/midi_device/usb_descriptors.c)
+target_link_libraries(AltQuant pico_multicore tinyusb_device tinyusb_board )
+target_sources(AltQuant PUBLIC ${CMAKE_CURRENT_LIST_DIR}/AltQuant/usb_descriptors.c)
 
 # add_example(normalisation_probe)
   
