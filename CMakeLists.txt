@@ -55,6 +55,8 @@ add_example(Cypress)
 add_example(Mello)
 
 add_example(AltQuant)
+
+add_example(Pocket_Dimension)
 # add_example(midi_device)
 target_link_libraries(AltQuant pico_multicore tinyusb_device tinyusb_board )
 target_sources(AltQuant PUBLIC ${CMAKE_CURRENT_LIST_DIR}/AltQuant/usb_descriptors.c)
@@ -89,3 +91,7 @@ target_sources(AltQuant PUBLIC ${CMAKE_CURRENT_LIST_DIR}/AltQuant/usb_descriptor
 #   ${CMAKE_CURRENT_LIST_DIR}/examples/midi_device_host/usb_midi_host_app_driver.c
 #   ${CMAKE_CURRENT_LIST_DIR}/examples/midi_device_host/usb_descriptors.c
 # )
+
+
+target_link_libraries(Pocket_Dimension pico_multicore tinyusb_device tinyusb_board )
+target_sources(Pocket_Dimension PUBLIC ${CMAKE_CURRENT_LIST_DIR}/Pocket_Dimension/usb_descriptors.c)
