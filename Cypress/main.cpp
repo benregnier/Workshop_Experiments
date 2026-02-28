@@ -6,10 +6,12 @@
 
 // Cypress: Pulse train / FOF synthesis
 //
-// - Main knob controls pulse frequency (summed with AudioIn2 1V/oct)
+// - Main knob controls pulse frequency / pitch
+// - AudioIn2 provides pitch CV
 // - X knob + CV1 control pulse width (CV1 patched: knob = attenuator)
 // - Y knob + CV2 control pulse tilt (rise/fall ratio)
 // - Switch up: constant-time width; switch middle: constant duty cycle
+// - Switch down: sine-shaped pulse instead of linear ramp
 // - AudioIn1 provides excitation for FOF; if unpatched, a static value is used
 
 namespace {

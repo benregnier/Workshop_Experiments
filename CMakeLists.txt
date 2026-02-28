@@ -18,6 +18,9 @@ cmake_minimum_required (VERSION 3.13)
 include(pico_sdk_import.cmake)
 project(computercard C CXX ASM)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+
 pico_sdk_init()
 
 macro (add_example _name)
