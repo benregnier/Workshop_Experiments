@@ -36,6 +36,31 @@ struct MIDIMessage
 			break;
 		}
 	}
+	
+	enum Command {Unknown = 0x00, NoteOn = 0x90, NoteOff = 0x80,
+		PitchBend = 0xE0, Aftertouch = 0xA0, CC = 0xB0,	PatchChange = 0xC0};
+	Command command;
+	uint8_t channel;
+	union // Store MIDI data bytes in two-byte union
+	{
+		struct
+		{
+			union // data byte 1
+			{
+				uint8_t note; // note on/off/aftertouch
+				uint8_t cc; // CC
+				uint8_t instrument; // patch change
+			};
+			union // data byte 2
+			{
+				uint8_t velocity; // note on/off
+				uint8_t touch; // aftertouch
+				uint8_t value; // CC 
+			};
+		};
+		int16_t pitchbend;
+	};
+};
 
 int32_t log2_note[12];
 
@@ -74,12 +99,30 @@ static inline QuantizedNote Quantize_12v(int32_t adc,
 	return q;
 }
 
-	
+static inline QuantizedNote Quantize_MidiNote(int32_t midiNote,
+										 int32_t octaves = 12,
+										 int32_t notesPerOctave = 12)
+{
+	if (midiNote < 0) midiNote = 0;
+	if (midiNote > 127) midiNote = 127;
+
+	int32_t totalSteps = octaves * notesPerOctave; // e.g. 144
+	// Map MIDI note [0..127] to step [0..totalSteps-1]
+	int32_t step = (midiNote * totalSteps) / 128;
+
+	QuantizedNote q;
+	q.step   = step;
+	q.octave = step / notesPerOctave;
+	q.note   = step % notesPerOctave;
+	return q;
+}
+
+
 
 class AltQuant : public ComputerCard
 {
 public:
-	MIDIDevice()
+	AltQuant()
 	{
 		// Start the second core
 		multicore_launch_core1(core1);
@@ -88,10 +131,15 @@ public:
 	// Boilerplate to call member function as second core
 	static void core1()
 	{
-		((MIDIDevice *)ThisPtr())->USBCore();
+		((AltQuant *)ThisPtr())->USBCore();
 	}
 
-	
+inline bool CVOut1MIDINote(int32_t midiNote)
+{
+	QuantizedNote q = Quantize_MidiNote(midiNote);
+	int32_t cvmv = -6000 + q.octave * 1000 + log2_note[q.note];
+	return CVOut1Millivolts(cvmv);
+}
 	// Code for second RP2040 core, blocking
 	// Handles MIDI in/out messages
 	void USBCore()
@@ -116,28 +164,29 @@ public:
 				switch (m.command)
 				{
 				case MIDIMessage::NoteOn:
-					if (m.velocity > 0) // real note on
+					if (m.velocity > 0 && !Connected(Input::CV1)) // real note on
 					{
 						CVOut1MIDINote(m.note);
-						LedOn(1);
+						LedOn(4);
 						PulseOut1(true);
 					}
 					else // note on with velocity 0 = note off
 					{
-						LedOff(1);
+						LedOff(4);
 						PulseOut1(false);
 					}
 					break;
 					
 				case MIDIMessage::NoteOff:
-					LedOff(1);
+					LedOff(4);
 					PulseOut1(false);
 					break;
 					
 				case MIDIMessage::CC:
 					// Mod wheel -> CV out 2
-					if (m.cc == 1)
+					if (m.cc == 1 && !Connected(Input::CV2))
 					{
+					
 						CVOut2(m.value << 4);
 						LedBrightness(3, m.value << 4);
 					}
@@ -164,7 +213,7 @@ public:
 	{
 	    int32_t qin1 = CVIn1();
 	    int32_t qin2 = CVIn2();
-	
+		
 	    QuantizedNote q1 = Quantize_12v(qin1);
 		QuantizedNote q2 = Quantize_12v(qin2);
 
@@ -172,13 +221,19 @@ public:
 		int32_t cv2mv = -6000 + q2.octave * 1000 + log2_note[q2.note];
     
 		// Output desired voltages on CV out
-		bool cv1limited = CVOut1Millivolts(cv1mv);
-		bool cv2limited = CVOut2Millivolts(cv2mv);
+		if (Connected(Input::CV1))
+		{
+			bool cv1limited = CVOut1Millivolts(cv1mv);
+			LedOn(0, cv1limited);
+		}
+		if (Connected(Input::CV2))
+		{
+			bool cv2limited = CVOut2Millivolts(cv2mv);
+			LedOn(1, cv2limited);
+		}
 
 		// Light top left/right LED, if requested voltage
 		// on corresponding channel is not possible
-		LedOn(0, cv1limited);
-		LedOn(1, cv2limited);
 
 		// Light bottom right LED if CV outputs have not been calibrated
 		LedOn(5, !CVOutsCalibrated());
@@ -190,6 +245,6 @@ int main()
 {
 	InitializeNotes();
 	AltQuant aq;
-
+	aq.EnableNormalisationProbe();
 	aq.Run();
 }
