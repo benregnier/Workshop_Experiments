@@ -1,30 +1,28 @@
-# Controls
-X : frequency shift  
-Y :   
-Main :  
+# Frequency Shifter (Q31 variant)
 
-# Inputs
-AudioIn1 : audio in  
-AudioIn2 :  
-CVIn1 :  
-CVIn2 :  
-PulseIn1 :  
-PulseIn2 :  
-# Outputs
-AudioOut1 : shifted audio out  
-AudioOut2 :  
-CVOut1 :  
-CVOut2 :  
-PulseOut1 :  
-PulseOut2 :  
+## Controls
+- **Main + Switch** : frequency shift amount/range
+  - **Switch Up** = wide, log-scaled bipolar range
+  - **Switch Middle** = narrower bipolar linear range
+  - **Switch Down** = same narrow shift range, and enables feedback mode cycling from PulseIn1
+- **X** : internal feedback amount
+- **Y** : AudioIn2 mix into AudioIn1
 
+## Inputs
+- **AudioIn1** : primary audio input
+- **AudioIn2** : secondary audio mixed by Y
+- **CVIn1** : shift modulation (added to Main)
+- **CVIn2** : combined feedback path blend (down/up balance)
+- **PulseIn1** : when switch is Down, rising edges cycle feedback mode: down -> up -> combined
+- **PulseIn2** : currently ignored
 
+## Outputs
+- **AudioOut1** : low sideband output
+- **AudioOut2** : high sideband output
+- **CV outputs** : unused for now
+- **Pulse outputs** : unused for now
 
-# LED
-0 :  
-1 :  
-2 :  
-3 :  
-4 :  
-5 :  
-
+## Notes
+- Integer Q31 DSP in the audio loop.
+- Large Hilbert and sine LUTs for wide-range operation.
+- Includes a conservative RP2040 overclock request to **250 MHz** for extra DSP headroom.
