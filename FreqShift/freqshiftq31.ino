@@ -229,7 +229,7 @@ private:
     }
 
     static uint32_t hzToPhaseIncrement(int32_t shiftHz) {
-        int64_t numer = static_cast<int64_t>(shiftHz) << PHASE_BITS;
+        int64_t numer = static_cast<int64_t>(shiftHz) * static_cast<int64_t>(1ULL << PHASE_BITS);
         int64_t inc = numer / FS;
         return static_cast<uint32_t>(inc);
     }
@@ -262,7 +262,7 @@ private:
         }
 
         for (int n = 0; n < mid; ++n) {
-            q31_t val = h[n] - h[HTAPS - 1 - n];
+            int64_t val = static_cast<int64_t>(h[n]) - static_cast<int64_t>(h[HTAPS - 1 - n]);
             h[n] = static_cast<q31_t>(val / 2);
             h[HTAPS - 1 - n] = static_cast<q31_t>(-h[n]);
         }
