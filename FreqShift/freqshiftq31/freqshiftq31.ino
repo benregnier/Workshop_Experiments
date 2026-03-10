@@ -1,4 +1,3 @@
-#ifdef USE_Q31_VARIANT
 // High-quality fixed-point frequency shifter with dual-sideband outputs.
 
 #include "ComputerCard.h"
@@ -318,5 +317,3 @@ void setup() {
 void loop() {
     gFreqShift.Run();
 }
-
-#endif // USE_Q31_VARIANT
