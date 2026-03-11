@@ -63,6 +63,7 @@ public:
         q31_t feedbackSignal = calcFeedbackSignal();
         q31_t fbApplied = mult_q31(feedbackSignal, feedbackGainQ31);
         q31_t x = sat_q31(static_cast<int64_t>(inMix) + static_cast<int64_t>(fbApplied));
+        inputLevelQ31 = smoothLevel(inputLevelQ31, abs_q31(x));
 
         q31_t I = pushDelay(x);
 
@@ -81,6 +82,10 @@ public:
         q31_t yQ = mult_q31(Q, sn);
         lowSideband = sat_q31(static_cast<int64_t>(yI) + static_cast<int64_t>(yQ));
         highSideband = sat_q31(static_cast<int64_t>(yI) - static_cast<int64_t>(yQ));
+        int32_t outAbs = abs_q31(lowSideband);
+        int32_t highAbs = abs_q31(highSideband);
+        if (highAbs > outAbs) outAbs = highAbs;
+        outputLevelQ31 = smoothLevel(outputLevelQ31, outAbs);
 
         AudioOut1(q31ToAudio(lowSideband));
         AudioOut2(q31ToAudio(highSideband));
@@ -105,6 +110,8 @@ private:
 
     q31_t lowSideband = 0;
     q31_t highSideband = 0;
+    int32_t inputLevelQ31 = 0;
+    int32_t outputLevelQ31 = 0;
 
     q31_t in1GainQ31 = 0x7FFFFFFF;
     q31_t in2GainQ31 = 0;
@@ -149,6 +156,26 @@ private:
         int64_t acc = static_cast<int64_t>(a) * static_cast<int64_t>(b);
         acc >>= 31;
         return sat_q31(acc);
+    }
+
+    static int32_t abs_q31(q31_t v) {
+        if (v >= 0) return static_cast<int32_t>(v);
+        if (v == static_cast<q31_t>(0x80000000)) return 0x7FFFFFFF;
+        return static_cast<int32_t>(-v);
+    }
+
+    static uint16_t q31ToLedQ12(int32_t v) {
+        if (v <= 0) return 0;
+        uint32_t scaled = static_cast<uint32_t>(v) >> 19;
+        if (scaled > 4095U) scaled = 4095U;
+        return static_cast<uint16_t>(scaled);
+    }
+
+    static int32_t smoothLevel(int32_t prev, int32_t currentAbs) {
+        if (currentAbs > prev) {
+            return prev + ((currentAbs - prev) >> 2);
+        }
+        return prev - ((prev - currentAbs) >> 6);
     }
 
     void updateControl() {
@@ -298,12 +325,24 @@ private:
     }
 
     void updateLeds() {
-        LedOn(0, currentShiftHz >= 0);
-        LedOn(1, currentShiftHz < 0);
-        LedOn(2, feedbackMode == FB_DOWN);
-        LedOn(3, feedbackMode == FB_UP);
-        LedOn(4, feedbackMode == FB_COMBINED);
-        LedOn(5, KnobVal(Knob::Y) > 2048);
+        LedBrightness(0, q31ToLedQ12(inputLevelQ31));
+        LedBrightness(1, q31ToLedQ12(outputLevelQ31));
+
+        LedOff(2);
+
+        int32_t magHz = currentShiftHz >= 0 ? currentShiftHz : -currentShiftHz;
+        int32_t maxHz = (SwitchVal() == Switch::Up) ? WIDE_MAX_SHIFT_HZ : NARROW_MAX_SHIFT_HZ;
+        uint16_t shiftLevel = 0;
+        if (maxHz > 0) {
+            int32_t scaled = (magHz * 4095) / maxHz;
+            if (scaled < 0) scaled = 0;
+            if (scaled > 4095) scaled = 4095;
+            shiftLevel = static_cast<uint16_t>(scaled);
+        }
+
+        LedBrightness(3, currentShiftHz >= 0 ? shiftLevel : 0);
+        LedBrightness(4, currentShiftHz < 0 ? shiftLevel : 0);
+        LedOff(5);
     }
 };
 
