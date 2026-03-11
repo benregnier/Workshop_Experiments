@@ -59,6 +59,8 @@ add_example(Mello)
 
 add_example(AltQuant)
 
+add_example(FreqShift)
+
 add_example(Pocket_Dimension)
 # add_example(midi_device)
 target_link_libraries(AltQuant pico_multicore tinyusb_device tinyusb_board )
