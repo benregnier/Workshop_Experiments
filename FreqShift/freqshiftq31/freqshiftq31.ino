@@ -25,7 +25,7 @@ public:
     // Frequency ranges.
     static constexpr int32_t WIDE_MIN_SHIFT_HZ = 2;
     static constexpr int32_t WIDE_MAX_SHIFT_HZ = 11000;
-    static constexpr int32_t NARROW_MAX_SHIFT_HZ = 2200;
+    static constexpr int32_t NARROW_MAX_SHIFT_HZ = 220;
 
     // Optional conservative overclock for extra DSP headroom.
     static constexpr uint32_t TARGET_SYS_CLOCK_KHZ = 250000;
