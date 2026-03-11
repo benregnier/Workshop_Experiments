@@ -9,7 +9,7 @@
 class FreqShifterQ31 : public ComputerCard {
 public:
     static constexpr int FS = 48000;
-    static constexpr int HTAPS = 1; // getting issues with more than one tap, likely cpu processor overruns in the dsp loop
+    static constexpr int HTAPS = 3; // getting issues with more than a handful of taps, likely cpu processor overruns in the dsp loop
     static constexpr int BLEN = 1;
     static constexpr int DELAYRB = 192;
 
