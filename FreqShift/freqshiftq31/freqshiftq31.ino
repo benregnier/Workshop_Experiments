@@ -9,7 +9,7 @@
 class FreqShifterQ31 : public ComputerCard {
 public:
     static constexpr int FS = 48000;
-    static constexpr int HTAPS = 95;
+    static constexpr int HTAPS = 1; // getting issues with more than one tap, likely cpu processor overruns in the dsp loop
     static constexpr int BLEN = 1;
     static constexpr int DELAYRB = 192;
 
@@ -33,7 +33,7 @@ public:
     enum FeedbackMode : uint8_t { FB_DOWN = 0, FB_UP = 1, FB_COMBINED = 2 };
 
     void Init() {
-        set_sys_clock_khz(TARGET_SYS_CLOCK_KHZ, true);
+        //set_sys_clock_khz(TARGET_SYS_CLOCK_KHZ, true); //this is causing crashing probably because of computercard
 
         buildHilbertQ31();
         arm_fir_init_q31(&firQ, HTAPS, h, firStateQ, BLEN);
