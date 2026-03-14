@@ -276,8 +276,16 @@ private:
         feedbackGainQ31 = q12ToQ31(xQ12);
 
         int32_t yQ12 = clamp12(KnobVal(Knob::Y));
-        in2GainQ31   = q12ToQ31(yQ12);
-        in1GainQ31   = static_cast<int32_t>(0x7FFFFFFF - in2GainQ31);
+        if (yQ12 < 50 || !Connected(Input::Audio2)) {
+            in1GainQ31 = 0x7FFFFFFF;
+            in2GainQ31 = 0;
+        } else if (yQ12 > 4045) {
+            in1GainQ31 = 0;
+            in2GainQ31 = 0x7FFFFFFF;
+        } else {
+            in2GainQ31 = q12ToQ31(yQ12);
+            in1GainQ31 = static_cast<int32_t>(0x7FFFFFFF - in2GainQ31);
+        }
 
         int32_t cv2Q12   = clamp12(CVIn2() + 2048);
         feedbackBlendQ31 = q12ToQ31(cv2Q12);
@@ -336,7 +344,7 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // Initialisation (runs once; floating-point is fine here)
+    // Initialisation 
     // -----------------------------------------------------------------------
     void buildHilbertQ31() {
         constexpr double kPi = 3.141592653589793238462643383279502884;
