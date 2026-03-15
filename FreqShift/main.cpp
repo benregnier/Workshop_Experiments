@@ -7,18 +7,18 @@
 //   CVIn2              : feedback blend CV (lower ↔ upper sideband)
 //
 // Outputs
-//   AudioOut1: lower sideband (shifts down)
-//   AudioOut2: upper sideband (shifts up)  
-//   CVOut1: static -5V (for normalisation)
-//   CVOut2: static +5V (for normalisation)
+//   AudioOut1          : lower sideband (shifts down)
+//   AudioOut2          : upper sideband (shifts up)
+//   CVOut1             : static -5V (for normalisation)
+//   CVOut2             : static +5V (for normalisation)
 //
 // Controls
-//   Main knob + CV1 : shift frequency (centre = 0 Hz)
-//   Switch Up       : wide range, log-scaled ±2–7000 Hz
+//   Main knob + CVIn1  : shift frequency (centre = 0 Hz)
+//   Switch Up          : wide range, log-scaled ±2–7000 Hz
 //   Switch Middle/Down : narrow range, linear ±440 Hz
-//   X knob          : feedback amount
-//   Y knob          : crossfade AudioIn1 → AudioIn2
-//   CV2             : feedback blend (lower ↔ upper sideband)
+//   X knob             : feedback amount
+//   Y knob             : crossfade AudioIn1 → AudioIn2
+//   CVIn2              : feedback blend (lower ↔ upper sideband)
 //
 // LEDs
 //   0 / 1 : input / output level
@@ -30,7 +30,7 @@
 #include <cmath>
 #include <cstdint>
 
-class FreqShifterQ31 : public ComputerCard {
+class FreqShifter : public ComputerCard {
 public:
     static constexpr int FS = 48000;
 
@@ -46,20 +46,22 @@ public:
     static constexpr int      FREQ_LUT_N   = 2048;
     static constexpr uint32_t PHASE_BITS   = 32;
 
-    // Shift = 19 maps ±2047 audio to ±50 % of Q31, giving ~6 dB headroom
+    // Shift = 19 maps ±2047 audio to ±50 % of full scale, giving ~6 dB headroom
     // so SSB peak combinations don't saturate the internal signal chain.
-    static constexpr int      AUDIO_Q31_SHIFT = 19;
+    static constexpr int      AUDIO_SHIFT = 19;
     static constexpr int16_t  AUDIO_MAX       = 2047;
     static constexpr int16_t  AUDIO_MIN       = -2048;
 
+    static constexpr double   kPi                = 3.141592653589793238462643383279502884;
     static constexpr int32_t WIDE_MIN_SHIFT_HZ   = 2;
     static constexpr int32_t WIDE_MAX_SHIFT_HZ   = 7000;
     static constexpr int32_t NARROW_MAX_SHIFT_HZ = 440;
 
     void Init() {
-        buildHilbertQ31();
-        buildSinLUT_Q31();
-        buildPhaseIncrementLUT();
+        buildHilbert();
+        buildSinLUT();
+        buildFreqLUT();
+        EnableNormalisationProbe();
 
         phase          = 0;
         phaseIncSigned = 0;
@@ -74,40 +76,37 @@ public:
         updateControl();
 
         // Mix AudioIn1 and AudioIn2 according to Y knob.
-        int32_t a1    = audioToQ31(AudioIn1());
-        int32_t a2    = audioToQ31(AudioIn2());
-        int32_t inMix = sat_q31(static_cast<int64_t>(mult_q31(a1, in1GainQ31)) +
-                                static_cast<int64_t>(mult_q31(a2, in2GainQ31)));
+        int32_t a1    = fromAudio(AudioIn1());
+        int32_t a2    = fromAudio(AudioIn2());
+        int32_t inMix = sat(static_cast<int64_t>(mul(a1, in1Gain)) +
+                                static_cast<int64_t>(mul(a2, in2Gain)));
 
         // Add internal feedback.
-        int32_t fbApplied = mult_q31(calcFeedbackSignal(), feedbackGainQ31);
-        int32_t x = sat_q31(static_cast<int64_t>(inMix) + static_cast<int64_t>(fbApplied));
-        inputLevelQ31 = smoothLevel(inputLevelQ31, abs_q31(x));
+        int32_t fbApplied = mul(feedbackSignal(), feedbackGain);
+        int32_t x = sat(static_cast<int64_t>(inMix) + static_cast<int64_t>(fbApplied));
+        inputLevel = smoothLevel(inputLevel, abs32(x));
 
         // I path: delayed to align with the FIR group delay.
-        int32_t I = pushDelay(x);
-
-        // Q path: 90-degree phase-shifted via Hilbert FIR.
-        int32_t Q = applyHilbertFIR(x);
+        int32_t I = delay(x);
+        int32_t Q = hilbert(x);
 
         // Advance oscillator and look up sin/cos.
         phase += phaseIncSigned;
         int32_t sn, cs;
-        sincos_q31(phase, sn, cs);
+        sincos(phase, sn, cs);
 
         // Single-sideband mixing.
-        int32_t yI     = mult_q31(I, cs);
-        int32_t yQ     = mult_q31(Q, sn);
-        lowSideband  = sat_q31(static_cast<int64_t>(yI) + static_cast<int64_t>(yQ));
-        highSideband = sat_q31(static_cast<int64_t>(yI) - static_cast<int64_t>(yQ));
+        int32_t yI     = mul(I, cs);
+        int32_t yQ     = mul(Q, sn);
+        lowSideband  = sat(static_cast<int64_t>(yI) + static_cast<int64_t>(yQ));
+        highSideband = sat(static_cast<int64_t>(yI) - static_cast<int64_t>(yQ));
 
-        int32_t outAbs  = abs_q31(lowSideband);
-        int32_t highAbs = abs_q31(highSideband);
-        if (highAbs > outAbs) outAbs = highAbs;
-        outputLevelQ31 = smoothLevel(outputLevelQ31, outAbs);
+        int32_t absLow  = abs32(lowSideband);
+        int32_t absHigh = abs32(highSideband);
+        outputLevel = smoothLevel(outputLevel, absHigh > absLow ? absHigh : absLow);
 
-        AudioOut1(q31ToAudio(lowSideband));
-        AudioOut2(q31ToAudio(highSideband));
+        AudioOut1(toAudio(lowSideband));
+        AudioOut2(toAudio(highSideband));
     }
 
 private:
@@ -128,19 +127,19 @@ private:
 
     // Lookup tables
     int32_t  sinLUT[SIN_LUT_N]          = {};
-    uint32_t widePhaseIncLUT[FREQ_LUT_N] = {};
+    uint32_t freqLUT[FREQ_LUT_N] = {};
 
     // Signal state
     int32_t lowSideband    = 0;
     int32_t highSideband   = 0;
-    int32_t inputLevelQ31  = 0;
-    int32_t outputLevelQ31 = 0;
+    int32_t inputLevel  = 0;
+    int32_t outputLevel = 0;
 
     // Control state
-    int32_t  in1GainQ31       = 0x7FFFFFFF;
-    int32_t  in2GainQ31       = 0;
-    int32_t  feedbackGainQ31  = 0;
-    int32_t  feedbackBlendQ31 = 0x40000000;
+    int32_t  in1Gain       = 0x7FFFFFFF;
+    int32_t  in2Gain       = 0;
+    int32_t  feedbackGain  = 0;
+    int32_t  feedbackBlend = 0x40000000;
     int32_t  currentShiftHz   = 0;
     uint16_t controlDivider   = 0;
 
@@ -153,39 +152,39 @@ private:
         return static_cast<int16_t>(v);
     }
 
-    static int32_t q12ToQ31(int32_t vQ12) {
-        return sat_q31(static_cast<int64_t>(vQ12) << 19);
+    static int32_t fromQ12(int32_t vQ12) {
+        return sat(static_cast<int64_t>(vQ12) << 19);
     }
 
-    static int32_t audioToQ31(int16_t sample) {
-        return static_cast<int32_t>(sample) << AUDIO_Q31_SHIFT;
+    static int32_t fromAudio(int16_t sample) {
+        return static_cast<int32_t>(sample) << AUDIO_SHIFT;
     }
 
-    static int16_t q31ToAudio(int32_t value) {
-        int32_t s = static_cast<int32_t>(value >> AUDIO_Q31_SHIFT);
+    static int16_t toAudio(int32_t value) {
+        int32_t s = static_cast<int32_t>(value >> AUDIO_SHIFT);
         if (s > AUDIO_MAX) s = AUDIO_MAX;
         if (s < AUDIO_MIN) s = AUDIO_MIN;
         return static_cast<int16_t>(s);
     }
 
-    static int32_t sat_q31(int64_t a) {
+    static int32_t sat(int64_t a) {
         if (a >  0x7FFFFFFFLL) return  0x7FFFFFFF;
         if (a < -0x80000000LL) return static_cast<int32_t>(0x80000000U);
         return static_cast<int32_t>(a);
     }
 
-    static int32_t mult_q31(int32_t a, int32_t b) {
+    static int32_t mul(int32_t a, int32_t b) {
         int64_t acc = static_cast<int64_t>(a) * static_cast<int64_t>(b);
-        return sat_q31(acc >> 31);
+        return sat(acc >> 31);
     }
 
-    static int32_t abs_q31(int32_t v) {
+    static int32_t abs32(int32_t v) {
         if (v >= 0) return static_cast<int32_t>(v);
         if (v == static_cast<int32_t>(0x80000000U)) return 0x7FFFFFFF;
         return static_cast<int32_t>(-v);
     }
 
-    static uint16_t q31ToLedQ12(int32_t v) {
+    static uint16_t toLed(int32_t v) {
         if (v <= 0) return 0;
         uint32_t s = static_cast<uint32_t>(v) >> 19;
         if (s > 4095U) s = 4095U;
@@ -201,15 +200,15 @@ private:
     // Hilbert FIR
     //
     // Exploits two properties of the antisymmetric Hilbert filter:
-    //   h[n] = -h[N-1-n]  → only one multiply per symmetric pair
+    //   h[n] = -h[N-1-n]  → one multiply per symmetric pair
     //   h[n] = 0 for even (n-mid)  → half of all pairs are zero
-    // For HTAPS=31 this yields 8 multiplies per sample.
+    // This yields (HTAPS-1)/4 multiplies per sample.
     //
-    // NOTE: the static_assert below enforces that mid=(HTAPS-1)/2 is odd,
-    // which means non-zero coefficients fall on even-indexed taps.  If you
-    // change HTAPS to one where mid is even, change the loop start from 0→1.
+    // static_assert enforces that mid=(HTAPS-1)/2 is odd, placing non-zero
+    // coefficients on even-indexed taps. If mid is even, change loop start
+    // from 0 to 1.
     // -----------------------------------------------------------------------
-    int32_t applyHilbertFIR(int32_t x) {
+    int32_t hilbert(int32_t x) {
         firState[firStatePtr] = x;
         if (++firStatePtr >= HTAPS) firStatePtr = 0;
 
@@ -229,13 +228,13 @@ private:
             int32_t diff = firState[new_idx] - firState[old_idx];
             acc += static_cast<int64_t>(h[n]) * static_cast<int64_t>(diff);
         }
-        return sat_q31(acc >> 31);
+        return sat(acc >> 31);
     }
 
     // -----------------------------------------------------------------------
     // I-path alignment delay
     // -----------------------------------------------------------------------
-    int32_t pushDelay(int32_t x) {
+    int32_t delay(int32_t x) {
         delayBuf[dWrite] = x;
         if (++dWrite >= DELAYRB) dWrite = 0;
         int32_t y = delayBuf[dRead];
@@ -261,7 +260,7 @@ private:
             int32_t magIdx = (shiftPos >= 2048) ? (shiftPos - 2048) : (2047 - shiftPos);
             if (magIdx < 0) magIdx = 0;
             if (magIdx >= FREQ_LUT_N) magIdx = FREQ_LUT_N - 1;
-            int32_t coarseHz = phaseIncToHz(widePhaseIncLUT[magIdx]);
+            int32_t coarseHz = phaseIncToHz(freqLUT[magIdx]);
             currentShiftHz   = (shiftPos >= 2048) ? coarseHz : -coarseHz;
         } else {
             // Middle / Down: narrow linear range.
@@ -269,33 +268,36 @@ private:
             currentShiftHz   = (centered * NARROW_MAX_SHIFT_HZ) / 2048;
         }
 
-        phaseIncSigned = hzToPhaseIncrement(currentShiftHz);
+        phaseIncSigned = hzToPhaseInc(currentShiftHz);
         updateLeds();
 
         int32_t xQ12    = clamp12(KnobVal(Knob::X));
-        feedbackGainQ31 = q12ToQ31(xQ12);
+        feedbackGain = fromQ12(xQ12);
 
         int32_t yQ12 = clamp12(KnobVal(Knob::Y));
-        if (yQ12 < 50 || !Connected(Input::Audio2)) {
-            in1GainQ31 = 0x7FFFFFFF;
-            in2GainQ31 = 0;
+        if (yQ12 < 50) {
+            in1Gain = 0x7FFFFFFF;
+            in2Gain = 0;
         } else if (yQ12 > 4045) {
-            in1GainQ31 = 0;
-            in2GainQ31 = 0x7FFFFFFF;
+            in1Gain = 0;
+            in2Gain = 0x7FFFFFFF;
         } else {
-            in2GainQ31 = q12ToQ31(yQ12);
-            in1GainQ31 = static_cast<int32_t>(0x7FFFFFFF - in2GainQ31);
+            in2Gain = fromQ12(yQ12);
+            in1Gain = static_cast<int32_t>(0x7FFFFFFF - in2Gain);
         }
 
         int32_t cv2Q12   = clamp12(CVIn2() + 2048);
-        feedbackBlendQ31 = q12ToQ31(cv2Q12);
+        feedbackBlend = fromQ12(cv2Q12);
     }
 
-    int32_t calcFeedbackSignal() const {
-        int32_t downPart = mult_q31(lowSideband,
-                                    static_cast<int32_t>(0x7FFFFFFF - feedbackBlendQ31));
-        int32_t upPart   = mult_q31(highSideband, feedbackBlendQ31);
-        return sat_q31(static_cast<int64_t>(downPart) + static_cast<int64_t>(upPart));
+    // -----------------------------------------------------------------------
+    // Feedback mix
+    // -----------------------------------------------------------------------
+    int32_t feedbackSignal() const {
+        int32_t downPart = mul(lowSideband,
+                                    static_cast<int32_t>(0x7FFFFFFF - feedbackBlend));
+        int32_t upPart   = mul(highSideband, feedbackBlend);
+        return sat(static_cast<int64_t>(downPart) + static_cast<int64_t>(upPart));
     }
 
     // -----------------------------------------------------------------------
@@ -306,12 +308,12 @@ private:
         return static_cast<int32_t>(n >> PHASE_BITS);
     }
 
-    static uint32_t hzToPhaseIncrement(int32_t shiftHz) {
+    static uint32_t hzToPhaseInc(int32_t shiftHz) {
         int64_t n = static_cast<int64_t>(shiftHz) * static_cast<int64_t>(1ULL << PHASE_BITS);
         return static_cast<uint32_t>(n / FS);
     }
 
-    void sincos_q31(uint32_t ph, int32_t& s, int32_t& c) const {
+    void sincos(uint32_t ph, int32_t& s, int32_t& c) const {
         constexpr uint32_t LUT_MASK = SIN_LUT_N - 1;
         uint32_t idx   = ph >> (PHASE_BITS - SIN_LUT_BITS);
         uint32_t idx90 = (idx + SIN_LUT_N / 4) & LUT_MASK;
@@ -323,8 +325,8 @@ private:
     // LED display
     // -----------------------------------------------------------------------
     void updateLeds() {
-        LedBrightness(0, q31ToLedQ12(inputLevelQ31));
-        LedBrightness(1, q31ToLedQ12(outputLevelQ31));
+        LedBrightness(0, toLed(inputLevel));
+        LedBrightness(1, toLed(outputLevel));
 
         int32_t magHz  = currentShiftHz >= 0 ? currentShiftHz : -currentShiftHz;
         int32_t maxHz  = (SwitchVal() == Switch::Up) ? WIDE_MAX_SHIFT_HZ : NARROW_MAX_SHIFT_HZ;
@@ -339,15 +341,14 @@ private:
         LedBrightness(2, currentShiftHz >= 0 ? shiftLevel : 0);
         LedBrightness(3, currentShiftHz  < 0 ? shiftLevel : 0);
 
-        LedBrightness(4, q31ToLedQ12(feedbackBlendQ31));
-        LedBrightness(5, q31ToLedQ12(static_cast<int32_t>(0x7FFFFFFF - feedbackBlendQ31)));
+        LedBrightness(4, toLed(feedbackBlend));
+        LedBrightness(5, toLed(static_cast<int32_t>(0x7FFFFFFF - feedbackBlend)));
     }
 
     // -----------------------------------------------------------------------
     // Initialisation 
     // -----------------------------------------------------------------------
-    void buildHilbertQ31() {
-        constexpr double kPi = 3.141592653589793238462643383279502884;
+    void buildHilbert() {
         const int mid = (HTAPS - 1) / 2;
 
         for (int n = 0; n < HTAPS; ++n) {
@@ -369,29 +370,27 @@ private:
         h[mid] = 0;
     }
 
-    void buildSinLUT_Q31() {
-        constexpr double kPi = 3.141592653589793238462643383279502884;
+    void buildSinLUT() {
         for (int i = 0; i < SIN_LUT_N; ++i) {
             double angle = 2.0 * kPi * i / SIN_LUT_N;
             sinLUT[i] = static_cast<int32_t>(std::llround(std::sin(angle) * 2147483647.0));
         }
     }
 
-    void buildPhaseIncrementLUT() {
+    void buildFreqLUT() {
         const double minHz = static_cast<double>(WIDE_MIN_SHIFT_HZ);
         const double maxHz = static_cast<double>(WIDE_MAX_SHIFT_HZ);
         const double ratio = std::pow(maxHz / minHz, 1.0 / (FREQ_LUT_N - 1));
         double hz = minHz;
         for (int i = 0; i < FREQ_LUT_N; ++i) {
-            widePhaseIncLUT[i] = hzToPhaseIncrement(static_cast<int32_t>(std::llround(hz)));
+            freqLUT[i] = hzToPhaseInc(static_cast<int32_t>(std::llround(hz)));
             hz *= ratio;
         }
     }
 };
 
 int main() {
-    FreqShifterQ31 freqShift;
-    freqShift.EnableNormalisationProbe();
+    FreqShifter freqShift;
     freqShift.Init();
     freqShift.Run();
 }
