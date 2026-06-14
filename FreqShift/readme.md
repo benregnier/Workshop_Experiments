@@ -1,4 +1,6 @@
-# Frequency Shifter (Q31 variant)
+# Frequency Shifter
+
+This frequency shifter is designed for feedback patching and experimental use, similar to the Red Panda 'Radius' pedal. 
 
 ## Controls
 - **Main + Switch** : frequency shift amount/range
@@ -23,6 +25,4 @@
 - **Pulse outputs** : unused for now
 
 ## Notes
-- Integer Q31 DSP in the audio loop.
-- Large Hilbert and sine LUTs for wide-range operation.
-- Includes a conservative RP2040 overclock request to **250 MHz** for extra DSP headroom.
+- Includes a RP2040 overclock request to 250 MHz for extra DSP headroom.
