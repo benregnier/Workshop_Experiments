@@ -1,7 +1,7 @@
 # Frequency Shifter
 
 This frequency shifter is designed for feedback patching and experimental use, similar to the Red Panda 'Radius' pedal. 
-<img src="./docs/FreqShift_Program_Card.gif" alt="FreqShift Controls" width="200"/>
+<img src="./docs/FreqShift_Program_Card.jpg" alt="FreqShift Controls" width="200"/>
 ## Controls
 - **Main** : frequency shift amount (center = 0 Hz)
 - **Switch** :
