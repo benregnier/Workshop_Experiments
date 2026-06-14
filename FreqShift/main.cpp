@@ -29,6 +29,8 @@
 #include "ComputerCard.h"
 #include <cmath>
 #include <cstdint>
+#include "hardware/clocks.h"
+#include "hardware/vreg.h"
 
 class FreqShifter : public ComputerCard {
 public:
@@ -36,7 +38,7 @@ public:
 
     // Hilbert FIR tap count.  Must be odd with an odd centre index
     // (i.e. HTAPS = 4k+3).  Increasing improves sideband rejection.
-    static constexpr int HTAPS = 31;
+    static constexpr int HTAPS = 63;
 
     // Delay ring-buffer for I-path alignment; must be >= (HTAPS-1)/2.
     static constexpr int DELAYRB = 64;
@@ -76,8 +78,8 @@ public:
         updateControl();
 
         // Mix AudioIn1 and AudioIn2 according to Y knob.
-        int32_t a1    = fromAudio(AudioIn1());
-        int32_t a2    = fromAudio(AudioIn2());
+        int32_t a1    = fromAudio(acCouple(AudioIn1(), dcState1));
+        int32_t a2    = fromAudio(acCouple(AudioIn2(), dcState2));
         int32_t inMix = sat(static_cast<int64_t>(mul(a1, in1Gain)) +
                                 static_cast<int64_t>(mul(a2, in2Gain)));
 
@@ -132,8 +134,10 @@ private:
     // Signal state
     int32_t lowSideband    = 0;
     int32_t highSideband   = 0;
-    int32_t inputLevel  = 0;
-    int32_t outputLevel = 0;
+    int32_t inputLevel     = 0;
+    int32_t outputLevel    = 0;
+    int32_t dcState1       = 0;  // per-channel DC-blocking state
+    int32_t dcState2       = 0;
 
     // Control state
     int32_t  in1Gain       = 0x7FFFFFFF;
@@ -146,6 +150,12 @@ private:
     // -----------------------------------------------------------------------
     // Fixed-point helpers
     // -----------------------------------------------------------------------
+    
+    static int16_t acCouple(int16_t input, int32_t& s) {
+        s += static_cast<int32_t>(input) - (s >> 12);
+        return static_cast<int16_t>(input - static_cast<int16_t>(s >> 12));
+    }
+
     static int16_t clamp12(int32_t v) {
         if (v < 0)    return 0;
         if (v > 4095) return 4095;
@@ -243,11 +253,9 @@ private:
     }
 
     // -----------------------------------------------------------------------
-    // Control + LED update (runs every 16 samples)
+    // Control + LED update
     // -----------------------------------------------------------------------
     void updateControl() {
-        if (++controlDivider < 16) return;
-        controlDivider = 0;
 
         int32_t mainQ12    = clamp12(KnobVal(Knob::Main));
         int32_t shiftCVQ12 = clamp12(CVIn1() + 2048);
@@ -297,7 +305,7 @@ private:
         int32_t downPart = mul(lowSideband,
                                     static_cast<int32_t>(0x7FFFFFFF - feedbackBlend));
         int32_t upPart   = mul(highSideband, feedbackBlend);
-        return sat(static_cast<int64_t>(downPart) + static_cast<int64_t>(upPart));
+        return sat(static_cast<int64_t>(downPart) + static_cast<int64_t>(upPart)) >> 1;
     }
 
     // -----------------------------------------------------------------------
@@ -390,6 +398,8 @@ private:
 };
 
 int main() {
+    vreg_set_voltage(VREG_VOLTAGE_1_15);
+    set_sys_clock_khz(200000, true);
     FreqShifter freqShift;
     freqShift.Init();
     freqShift.Run();
