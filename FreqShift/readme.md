@@ -27,5 +27,12 @@ This frequency shifter is designed for feedback patching and experimental use, s
 - **2 / 3** : positive / negative shift
 - **4 / 5** : upper / lower sideband
 
+## Examples
+
+Example track using this card in feedback at: https://benregnier.bandcamp.com/track/freqshift
+
+This is the patch used in the track
+<img src="./docs/FreqShift - Patch.png" alt="FreqShift Controls" width="400"/>
+
 ## Notes
 - Includes a RP2040 overclock request to 250 MHz for extra DSP headroom.
